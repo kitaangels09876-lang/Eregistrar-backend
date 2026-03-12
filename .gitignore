@@ -1,0 +1,82 @@
+# ============================
+# Node / NPM
+# ============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Package locks (optional)
+# Remove if you want to commit lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============================
+# Environment Variables
+# ============================
+.env
+.env.local
+.env.*.local
+
+# ============================
+# Logs
+# ============================
+logs/
+*.log
+*.log.*
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ============================
+# Build & Output
+# ============================
+dist/
+build/
+coverage/
+.nyc_output/
+
+# TypeScript build files
+*.tsbuildinfo
+
+# ============================
+# Cache
+# ============================
+.cache/
+.tmp/
+temp/
+tmp/
+
+# ============================
+# OS / System files
+# ============================
+.DS_Store
+Thumbs.db
+
+# ============================
+# IDE / Editor Files
+# ============================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.swp
+
+# ============================
+# PM2 Logs & Dumps
+# ============================
+.pm2/logs/
+pm2.log
+dump.rdb
+
+# ============================
+# Uploads (optional)
+# Uncomment if needed
+# public/uploads/
+# uploads/
+uploads/payments/
+uploads/receipts/

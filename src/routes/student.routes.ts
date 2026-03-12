@@ -1,0 +1,38 @@
+import { Router } from "express";
+import { getAllStudents,getStudentById,updateStudentStatus, validateEmailAvailability,updateStudentAcademicStatus  } from "../controllers/student.controller";
+import { authenticateToken, requireRole } from "../middlewares/auth.middleware";
+
+const router = Router();
+
+router.get(
+  "/students",
+  authenticateToken,
+  requireRole("admin", "registrar"),
+  getAllStudents
+);
+
+router.get(
+  "/students/:studentId",
+  authenticateToken,
+  requireRole("admin", "registrar"),
+  getStudentById
+);
+
+router.patch(
+  "/students/:studentId/status",
+  authenticateToken,
+  requireRole("admin", "registrar"),
+  updateStudentStatus
+);
+
+router.patch(
+  "/students/:studentId/academic-status",
+  authenticateToken,
+  requireRole("admin", "registrar","student"),
+  updateStudentAcademicStatus
+);
+
+
+router.post("/validate-email", validateEmailAvailability);
+
+export default router;
