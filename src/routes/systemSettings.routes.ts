@@ -7,7 +7,6 @@ const router = Router();
 
 router.get(
   "/system-settings",
-  authenticateToken,
   getSystemSettings
 );
 

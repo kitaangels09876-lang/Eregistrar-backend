@@ -4,7 +4,9 @@ import {
   login,
   logout,
   checkAuth,
-  registerStudent
+  registerStudent,
+  verifyEmail,
+  resendVerificationEmail
 } from "../controllers/auth.controller";
 
 import { authenticateToken,requireRole } from "../middlewares/auth.middleware";
@@ -48,6 +50,10 @@ router.post(
   validateStudentRegister,
   registerStudent
 );
+
+router.get("/verify-email", verifyEmail);
+
+router.post("/resend-verification-email", resendVerificationEmail);
 
 
 export default router;

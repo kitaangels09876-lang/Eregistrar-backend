@@ -353,8 +353,8 @@ export const updateStudentAcademicStatus = async (
   try {
     const { studentId } = req.params;
     const { year_level, enrollment_status } = req.body;
-
-    const validYearLevels = ["1st", "2nd", "3rd", "4th", "graduate"];
+    const normalizedYearLevel =
+      typeof year_level === "string" ? year_level.trim() : year_level;
     const validEnrollmentStatuses = [
       "enrolled",
       "graduated",
@@ -364,14 +364,13 @@ export const updateStudentAcademicStatus = async (
     ];
 
     if (
-      (year_level && !validYearLevels.includes(year_level)) ||
-      (enrollment_status &&
-        !validEnrollmentStatuses.includes(enrollment_status))
+      enrollment_status &&
+      !validEnrollmentStatuses.includes(enrollment_status)
     ) {
       await transaction.rollback();
       return res.status(400).json({
         status: "error",
-        message: "Invalid year_level or enrollment_status value",
+        message: "Invalid enrollment_status value",
       });
     }
 
@@ -399,9 +398,9 @@ export const updateStudentAcademicStatus = async (
     const updates: string[] = [];
     const replacements: any = { studentId };
 
-    if (year_level) {
+    if (normalizedYearLevel) {
       updates.push("year_level = :year_level");
-      replacements.year_level = year_level;
+      replacements.year_level = normalizedYearLevel;
     }
 
     if (enrollment_status) {
@@ -440,7 +439,10 @@ export const updateStudentAcademicStatus = async (
         replacements: {
           userId: (req as any).user.user_id,
           studentId,
-          newValue: JSON.stringify({ year_level, enrollment_status }),
+          newValue: JSON.stringify({
+            year_level: normalizedYearLevel,
+            enrollment_status,
+          }),
         },
         type: QueryTypes.INSERT,
         transaction,

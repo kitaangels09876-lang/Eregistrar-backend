@@ -8,6 +8,8 @@
     - Endpoint
     default
         http://localhost:3001/api/system-settings
+    - Authentication
+        Public
         
 --------------------------------------------------
 response (200 OK)

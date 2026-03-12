@@ -47,6 +47,20 @@ JWT_EXPIRES_IN=1d
 # FRONTEND (IMPORTANT FOR CORS + COOKIES)
 # ==========================================
 FRONTEND_URL=http://localhost:3000
+BACKEND_URL=http://localhost:3001
+
+# ==========================================
+# EMAIL VERIFICATION
+# ==========================================
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@example.com
+SMTP_PASS=your-app-password
+SMTP_FROM=your-email@example.com
+
+EMAIL_VERIFICATION_SECRET=another_long_random_secret_here
+EMAIL_VERIFICATION_EXPIRES_IN=1d
 
 
 ```
@@ -77,6 +91,8 @@ The server should now be running on:  http://localhost:3001
 --------------------------------------------------
 You can test the API endpoints using a tool like **Postman** or **cURL**.
 
+Student self-registration now sends a verification email. The student account stays `inactive` until the user opens the `/api/auth/verify-email?token=...` link from the email.
+
 #postman
 
 --------------------------------------------------
@@ -87,4 +103,3 @@ You can test the API endpoints using a tool like **Postman** or **cURL**.
 - [Postman](https://www.postman.com/)
 
 🚀 **Happy coding!**
-

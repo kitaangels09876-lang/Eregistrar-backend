@@ -77,7 +77,7 @@
 
         course_id INT NULL,
 
-        year_level ENUM('1st','2nd','3rd','4th','graduate') NULL,
+        year_level VARCHAR(100) NULL,
         enrollment_status ENUM('enrolled','graduated','dropped','transferred','alumni') DEFAULT 'enrolled',
 
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -503,8 +503,8 @@ CREATE TABLE notifications (
     CREATE TABLE announcements (
         announcement_id INT AUTO_INCREMENT PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
-        start_date DATE NOT NULL,
-        end_date DATE NOT NULL,
+        start_date DATE NULL,
+        end_date DATE NULL,
         message TEXT NOT NULL,
         posted_by VARCHAR(255) NOT NULL,
         created_by INT NOT NULL,
@@ -578,6 +578,4 @@ CREATE TABLE notifications (
         '/uploads/system/icon.png',
         NULL
     );
-
-
 

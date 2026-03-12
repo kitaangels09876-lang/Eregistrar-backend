@@ -7,7 +7,7 @@ const router = Router();
 router.get(
   "/roles",
   authenticateToken,
-  requireRole("admin"),
+  requireRole("admin", "registrar"),
   getAllRoles
 );
 

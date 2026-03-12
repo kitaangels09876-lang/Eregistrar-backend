@@ -3,6 +3,9 @@ import { Announcement } from "../models";
 import { Op } from "sequelize";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 
+const getSingleParam = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
     const { title, start_date, end_date, message } = req.body;
@@ -16,10 +19,10 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       });
     }
 
-    if (!title || !start_date || !end_date || !message) {
+    if (!title || !message) {
       return res.status(400).json({
         status: "error",
-        message: "Title, start date, end date, and message are required"
+        message: "Title and message are required"
       });
     }
 
@@ -27,8 +30,8 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 
     const announcement = await Announcement.create({
       title,
-      start_date,
-      end_date,
+      start_date: start_date || null,
+      end_date: end_date || null,
       message,
       posted_by: postedBy,
       created_by: userId
@@ -40,9 +43,9 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       tableName: "announcements",
       recordId: announcement.announcement_id,
       newValue: {
-        title,
-        start_date,
-        end_date,
+        title: announcement.title,
+        start_date: announcement.start_date,
+        end_date: announcement.end_date,
         posted_by: postedBy
       },
       req
@@ -108,8 +111,16 @@ export const getAllAnnouncements = async (req: Request, res: Response) => {
 
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
-    const { announcementId } = req.params;
+    const announcementId = getSingleParam(req.params.announcementId);
     const { title, start_date, end_date, message } = req.body;
+    const hasStartDate = Object.prototype.hasOwnProperty.call(
+      req.body ?? {},
+      "start_date"
+    );
+    const hasEndDate = Object.prototype.hasOwnProperty.call(
+      req.body ?? {},
+      "end_date"
+    );
 
     const userId = getUserIdFromRequest(req);
 
@@ -117,6 +128,13 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
       return res.status(401).json({
         status: "error",
         message: "Unauthorized"
+      });
+    }
+
+    if (!announcementId) {
+      return res.status(400).json({
+        status: "error",
+        message: "Announcement ID is required"
       });
     }
 
@@ -138,8 +156,8 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
 
     await announcement.update({
       title: title ?? announcement.title,
-      start_date: start_date ?? announcement.start_date,
-      end_date: end_date ?? announcement.end_date,
+      start_date: hasStartDate ? start_date || null : announcement.start_date,
+      end_date: hasEndDate ? end_date || null : announcement.end_date,
       message: message ?? announcement.message
     });
 
@@ -173,7 +191,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
 
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
-    const { announcementId } = req.params;
+    const announcementId = getSingleParam(req.params.announcementId);
 
     const userId = getUserIdFromRequest(req);
 
@@ -181,6 +199,13 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
       return res.status(401).json({
         status: "error",
         message: "Unauthorized"
+      });
+    }
+
+    if (!announcementId) {
+      return res.status(400).json({
+        status: "error",
+        message: "Announcement ID is required"
       });
     }
 

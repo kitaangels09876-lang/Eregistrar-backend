@@ -4,6 +4,7 @@
   import bcrypt from "bcryptjs";
   import { generateToken } from '../config/jwt.config';
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
+import { sendEmailVerificationEmail, verifyEmailVerificationToken } from "../services/emailVerification.service";
 
 
   const setTokenCookie = (res: Response, token: string) => {
@@ -120,6 +121,11 @@ export const registerStaff = async (req: Request, res: Response) => {
 
 export const registerStudent = async (req: Request, res: Response) => {
   const transaction = await sequelize.transaction();
+  const rollbackTransaction = async () => {
+    if (!(transaction as any).finished) {
+      await transaction.rollback();
+    }
+  };
 
   try {
     const {
@@ -139,10 +145,16 @@ export const registerStudent = async (req: Request, res: Response) => {
 
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
-      await transaction.rollback();
+      await rollbackTransaction();
       return res.status(400).json({
         status: "error",
-        message: "Email already exists",
+        message: "Please correct the highlighted fields and try again.",
+        errors: [
+          {
+            field: "email",
+            message: "This email is already registered.",
+          },
+        ],
       });
     }
 
@@ -150,10 +162,16 @@ export const registerStudent = async (req: Request, res: Response) => {
       where: { student_number },
     });
     if (existingStudent) {
-      await transaction.rollback();
+      await rollbackTransaction();
       return res.status(400).json({
         status: "error",
-        message: "Student number already exists",
+        message: "Please correct the highlighted fields and try again.",
+        errors: [
+          {
+            field: "student_number",
+            message: "This student number is already registered.",
+          },
+        ],
       });
     }
 
@@ -164,6 +182,7 @@ export const registerStudent = async (req: Request, res: Response) => {
         email,
         password: hashedPassword,
         account_type: "student",
+        status: "inactive",
       },
       { transaction }
     );
@@ -204,29 +223,23 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
     }
 
-    const token = generateToken({
-      user_id: user.user_id,
+    await sendEmailVerificationEmail({
+      userId: user.user_id,
       email: user.email,
-      account_type: "student",
-      roles: ["student"],
-    });
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 60 * 60 * 1000,
+      firstName: student.first_name,
     });
 
     await transaction.commit();
 
     return res.status(201).json({
       status: "success",
-      message: "Student account created successfully",
+      message:
+        "Student account created successfully. Please check your email to activate it.",
       user: {
         user_id: user.user_id,
         email: user.email,
         account_type: "student",
+        status: user.status,
       },
       student: {
         student_id: student.student_id,
@@ -237,12 +250,16 @@ export const registerStudent = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    await transaction.rollback();
+    await rollbackTransaction();
     console.error("REGISTER STUDENT ERROR:", error);
 
     return res.status(500).json({
       status: "error",
-      message: "Internal server error",
+      message:
+        error?.message?.includes("SMTP") ||
+        error?.message?.includes("verification")
+          ? "Failed to send verification email"
+          : "Internal server error",
     });
   }
 };
@@ -270,7 +287,10 @@ export const registerStudent = async (req: Request, res: Response) => {
       if (user.status === "inactive") {
         return res.status(403).json({
           status: "error",
-          message: "Your account is inactive. Contact administrator.",
+          message:
+            user.account_type === "student"
+              ? "Please verify your email before logging in."
+              : "Your account is inactive. Contact administrator.",
         });
       }
 
@@ -534,6 +554,211 @@ export const registerStudent = async (req: Request, res: Response) => {
       status: "error",
       authenticated: false,
       message: "Internal server error",
+    });
+  }
+};
+
+const renderVerificationPage = ({
+  title,
+  message,
+  tone,
+}: {
+  title: string;
+  message: string;
+  tone: "success" | "error";
+}): string => {
+  const accentColor = tone === "success" ? "#0f766e" : "#b91c1c";
+  const surfaceColor = tone === "success" ? "#ecfdf5" : "#fef2f2";
+
+  return `<!DOCTYPE html>
+  <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>${title}</title>
+    </head>
+    <body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a;">
+      <div style="max-width:560px;margin:60px auto;padding:0 20px;">
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:32px;box-shadow:0 10px 30px rgba(15,23,42,0.08);">
+          <div style="display:inline-block;padding:6px 12px;border-radius:999px;background:${surfaceColor};color:${accentColor};font-weight:700;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">
+            Email verification
+          </div>
+          <h1 style="margin:16px 0 12px;font-size:28px;line-height:1.2;">${title}</h1>
+          <p style="margin:0;font-size:16px;line-height:1.6;color:#334155;">${message}</p>
+        </div>
+      </div>
+    </body>
+  </html>`;
+};
+
+export const verifyEmail = async (req: Request, res: Response) => {
+  try {
+    const token =
+      typeof req.query.token === "string" ? req.query.token.trim() : "";
+
+    if (!token) {
+      return res
+        .status(400)
+        .type("html")
+        .send(
+          renderVerificationPage({
+            title: "Invalid verification link",
+            message: "The verification token is missing from this request.",
+            tone: "error",
+          })
+        );
+    }
+
+    const payload = verifyEmailVerificationToken(token);
+
+    if (payload.purpose !== "email_verification") {
+      return res
+        .status(400)
+        .type("html")
+        .send(
+          renderVerificationPage({
+            title: "Invalid verification link",
+            message: "This verification token is not valid for account activation.",
+            tone: "error",
+          })
+        );
+    }
+
+    const user = await User.findOne({
+      where: {
+        user_id: payload.user_id,
+        email: payload.email,
+      },
+    });
+
+    if (!user) {
+      return res
+        .status(404)
+        .type("html")
+        .send(
+          renderVerificationPage({
+            title: "Account not found",
+            message: "We could not find an account for this verification link.",
+            tone: "error",
+          })
+        );
+    }
+
+    if (user.status === "active") {
+      return res
+        .status(200)
+        .type("html")
+        .send(
+          renderVerificationPage({
+            title: "Email already confirmed",
+            message: "This account is already active. You can return to the app and log in.",
+            tone: "success",
+          })
+        );
+    }
+
+    await user.update({ status: "active" });
+
+    await logActivity({
+      userId: user.user_id,
+      action: "VERIFY_EMAIL",
+      tableName: "users",
+      recordId: user.user_id,
+      oldValue: { status: "inactive" },
+      newValue: { status: "active" },
+      req,
+    });
+
+    return res
+      .status(200)
+      .type("html")
+      .send(
+        renderVerificationPage({
+          title: "Email confirmed",
+          message: "Your account is now active. You can return to the app and log in.",
+          tone: "success",
+        })
+      );
+  } catch (error: any) {
+    const isExpiredToken = error?.name === "TokenExpiredError";
+
+    return res
+      .status(400)
+      .type("html")
+      .send(
+        renderVerificationPage({
+          title: isExpiredToken
+            ? "Verification link expired"
+            : "Verification failed",
+          message: isExpiredToken
+            ? "This verification link has expired. Request a new confirmation email and try again."
+            : "This verification link is invalid or has already been changed.",
+          tone: "error",
+        })
+      );
+  }
+};
+
+export const resendVerificationEmail = async (req: Request, res: Response) => {
+  try {
+    const email =
+      typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+
+    if (!email) {
+      return res.status(400).json({
+        status: "error",
+        message: "Email is required",
+      });
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid email format",
+      });
+    }
+
+    const user = await User.findOne({
+      where: {
+        email,
+        account_type: "student",
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        status: "error",
+        message: "Student account not found",
+      });
+    }
+
+    if (user.status === "active") {
+      return res.status(400).json({
+        status: "error",
+        message: "This account is already active",
+      });
+    }
+
+    const student = await StudentProfile.findOne({
+      where: { user_id: user.user_id },
+      attributes: ["first_name"],
+    });
+
+    await sendEmailVerificationEmail({
+      userId: user.user_id,
+      email: user.email,
+      firstName: student?.first_name,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Verification email sent successfully",
+    });
+  } catch (error) {
+    console.error("RESEND VERIFICATION EMAIL ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to send verification email",
     });
   }
 };

@@ -17,7 +17,7 @@ interface StudentProfileAttributes {
   profile_picture?: string | null;
 
   course_id?: number | null;
-  year_level?: "1st" | "2nd" | "3rd" | "4th" | "graduate" | null;
+  year_level?: string | null;
 
   enrollment_status?: "enrolled" | "graduated" | "dropped" | "transferred";
   created_at?: Date;
@@ -51,7 +51,7 @@ export class StudentProfile
   public profile_picture!: string | null;
 
   public course_id!: number | null;
-  public year_level!: "1st" | "2nd" | "3rd" | "4th" | "graduate" | null;
+  public year_level!: string | null;
 
   public enrollment_status!: "enrolled" | "graduated" | "dropped" | "transferred";
   public readonly created_at!: Date;
@@ -112,7 +112,7 @@ StudentProfile.init(
       allowNull: true,
     },
     year_level: {
-      type: DataTypes.ENUM("1st", "2nd", "3rd", "4th", "graduate"),
+      type: DataTypes.STRING,
       allowNull: true,
     },
     enrollment_status: {

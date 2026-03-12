@@ -13,10 +13,14 @@ Body:raw
 --------------------------------------------------
 {
   "title": "TMC | Holiday Non Working Days",
-  "start_date": "2025-11-01",
-  "end_date": "2025-11-05",
   "message": "updated"
 }
+
+Optional fields:
+  "start_date": "2025-11-01"
+  "end_date": "2025-11-05"
+  "start_date": null
+  "end_date": null
 
 --------------------------------------------------
 Response    (200 OK)

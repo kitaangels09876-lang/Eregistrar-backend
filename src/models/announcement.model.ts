@@ -4,8 +4,8 @@ import sequelize from "../config/db.config";
 interface AnnouncementAttributes {
   announcement_id: number;
   title: string;
-  start_date: Date;
-  end_date: Date;
+  start_date?: Date | null;
+  end_date?: Date | null;
   message: string;
   posted_by: string;
   created_by: number;
@@ -14,7 +14,7 @@ interface AnnouncementAttributes {
 
 type AnnouncementCreationAttributes = Optional<
   AnnouncementAttributes,
-  "announcement_id" | "created_at"
+  "announcement_id" | "created_at" | "start_date" | "end_date"
 >;
 
 export class Announcement extends Model<
@@ -23,8 +23,8 @@ export class Announcement extends Model<
 > implements AnnouncementAttributes {
   public announcement_id!: number;
   public title!: string;
-  public start_date!: Date;
-  public end_date!: Date;
+  public start_date!: Date | null;
+  public end_date!: Date | null;
   public message!: string;
   public posted_by!: string;
   public created_by!: number;
@@ -44,11 +44,11 @@ Announcement.init(
     },
     start_date: {
       type: DataTypes.DATEONLY,
-      allowNull: false
+      allowNull: true
     },
     end_date: {
       type: DataTypes.DATEONLY,
-      allowNull: false
+      allowNull: true
     },
     message: {
       type: DataTypes.TEXT,
