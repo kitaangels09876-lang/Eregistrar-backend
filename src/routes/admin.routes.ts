@@ -19,6 +19,13 @@ router.get(
 );
 
 router.put(
+  "/admins/:userId",
+  authenticateToken,
+  requireRole("admin"),
+  updateAdminAccount
+);
+
+router.put(
   "/admins/:userId/role",
   authenticateToken,
   requireRole("admin"),

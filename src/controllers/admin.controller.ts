@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { sequelize, Admin as AdminProfile, User } from "../models";
-import { QueryTypes } from "sequelize";
+import { QueryTypes, UniqueConstraintError } from "sequelize";
 
 export const getAllAdminAndRegistrarAccounts = async (
   req: Request,
@@ -380,8 +380,27 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const authUser = (req as any).user;
-    const userId = authUser.user_id;
+    const authUser = req.user;
+
+    if (!authUser?.user_id) {
+      await transaction.rollback();
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required",
+      });
+    }
+
+    const targetUserId = req.params.userId
+      ? Number(req.params.userId)
+      : authUser.user_id;
+
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid user ID",
+      });
+    }
 
     const {
       email,
@@ -392,33 +411,187 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       contact_number,
     } = req.body;
 
-    if (email || status) {
+    const normalizedEmail =
+      email === undefined ? undefined : String(email).trim().toLowerCase();
+    const normalizedStatus =
+      status === undefined
+        ? undefined
+        : (String(status).trim().toLowerCase() as "active" | "inactive");
+    const normalizedFirstName =
+      first_name === undefined ? undefined : String(first_name).trim();
+    const normalizedMiddleName =
+      middle_name === undefined ? undefined : String(middle_name).trim() || null;
+    const normalizedLastName =
+      last_name === undefined ? undefined : String(last_name).trim();
+    const normalizedContactNumber =
+      contact_number === undefined
+        ? undefined
+        : String(contact_number).trim() || null;
+
+    if (
+      normalizedEmail === undefined &&
+      normalizedStatus === undefined &&
+      normalizedFirstName === undefined &&
+      normalizedMiddleName === undefined &&
+      normalizedLastName === undefined &&
+      normalizedContactNumber === undefined
+    ) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "No fields provided for update",
+      });
+    }
+
+    if (normalizedEmail !== undefined) {
+      if (!normalizedEmail) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Please correct the highlighted fields and try again.",
+          errors: [
+            {
+              field: "email",
+              message: "Email is required.",
+            },
+          ],
+        });
+      }
+
+      if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Please correct the highlighted fields and try again.",
+          errors: [
+            {
+              field: "email",
+              message: "Invalid email format.",
+            },
+          ],
+        });
+      }
+    }
+
+    if (
+      normalizedStatus !== undefined &&
+      !["active", "inactive"].includes(normalizedStatus)
+    ) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid status. Allowed values: active, inactive",
+      });
+    }
+
+    if (normalizedFirstName !== undefined && !normalizedFirstName) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "First name is required",
+      });
+    }
+
+    if (normalizedLastName !== undefined && !normalizedLastName) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Last name is required",
+      });
+    }
+
+    if (normalizedContactNumber !== undefined && normalizedContactNumber !== null) {
+      const digits = normalizedContactNumber.replace(/\D/g, "");
+
+      if (digits.length !== 11) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Contact number must be exactly 11 digits",
+        });
+      }
+    }
+
+    const existingAccount = await User.findByPk(targetUserId, {
+      attributes: ["user_id"],
+      transaction,
+    });
+
+    const existingProfile = await AdminProfile.findOne({
+      where: { user_id: targetUserId },
+      attributes: ["admin_id"],
+      transaction,
+    });
+
+    if (!existingAccount || !existingProfile) {
+      await transaction.rollback();
+      return res.status(404).json({
+        status: "error",
+        message: "Admin or Registrar not found",
+      });
+    }
+
+    if (normalizedEmail !== undefined) {
+      const duplicateEmailUser = await User.findOne({
+        where: { email: normalizedEmail },
+        attributes: ["user_id"],
+        transaction,
+      });
+
+      if (duplicateEmailUser && duplicateEmailUser.user_id !== targetUserId) {
+        await transaction.rollback();
+        return res.status(409).json({
+          status: "error",
+          message: "Please correct the highlighted fields and try again.",
+          errors: [
+            {
+              field: "email",
+              message: "This email is already registered.",
+            },
+          ],
+        });
+      }
+    }
+
+    const userUpdates = {
+      ...(normalizedEmail !== undefined && { email: normalizedEmail }),
+      ...(normalizedStatus !== undefined && { status: normalizedStatus }),
+    };
+
+    if (Object.keys(userUpdates).length > 0) {
       await User.update(
+        userUpdates,
         {
-          ...(email && { email }),
-          ...(status && { status }),
-          updated_at: new Date(),
-        },
-        {
-          where: { user_id: userId },
+          where: { user_id: targetUserId },
           transaction,
         }
       );
     }
 
-    await AdminProfile.update(
-      {
-        ...(first_name && { first_name }),
-        ...(middle_name !== undefined && { middle_name }),
-        ...(last_name && { last_name }),
-        ...(contact_number !== undefined && { contact_number }),
-        updated_at: new Date(),
-      },
-      {
-        where: { user_id: userId },
-        transaction,
-      }
-    );
+    const profileUpdates = {
+      ...(normalizedFirstName !== undefined && {
+        first_name: normalizedFirstName,
+      }),
+      ...(normalizedMiddleName !== undefined && {
+        middle_name: normalizedMiddleName,
+      }),
+      ...(normalizedLastName !== undefined && {
+        last_name: normalizedLastName,
+      }),
+      ...(normalizedContactNumber !== undefined && {
+        contact_number: normalizedContactNumber,
+      }),
+    };
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await AdminProfile.update(
+        profileUpdates,
+        {
+          where: { user_id: targetUserId },
+          transaction,
+        }
+      );
+    }
 
     await transaction.commit();
 
@@ -430,6 +603,19 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
   } catch (error: any) {
     await transaction.rollback();
     console.error("UPDATE ADMIN ACCOUNT ERROR:", error);
+
+    if (error instanceof UniqueConstraintError || error?.name === "SequelizeUniqueConstraintError") {
+      return res.status(409).json({
+        status: "error",
+        message: "Please correct the highlighted fields and try again.",
+        errors: [
+          {
+            field: "email",
+            message: "This email is already registered.",
+          },
+        ],
+      });
+    }
 
     return res.status(500).json({
       status: "error",

@@ -19,7 +19,7 @@ interface StudentProfileAttributes {
   course_id?: number | null;
   year_level?: string | null;
 
-  enrollment_status?: "enrolled" | "graduated" | "dropped" | "transferred";
+  enrollment_status?: "enrolled" | "graduated" | "dropped" | "transferred" | "alumni";
   created_at?: Date;
   updated_at?: Date | null;
 }
@@ -53,7 +53,7 @@ export class StudentProfile
   public course_id!: number | null;
   public year_level!: string | null;
 
-  public enrollment_status!: "enrolled" | "graduated" | "dropped" | "transferred";
+  public enrollment_status!: "enrolled" | "graduated" | "dropped" | "transferred" | "alumni";
   public readonly created_at!: Date;
   public readonly updated_at!: Date | null;
 }
@@ -120,7 +120,8 @@ StudentProfile.init(
         "enrolled",
         "graduated",
         "dropped",
-        "transferred"
+        "transferred",
+        "alumni"
       ),
       defaultValue: "enrolled",
     },
