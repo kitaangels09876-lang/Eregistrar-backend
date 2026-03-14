@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { sequelize,Payment } from "../models";
 import { QueryTypes } from "sequelize";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
+import {
+  createNotification,
+  getStudentPaymentNotificationContext,
+} from "../services/notification.service";
 
 export const getAllPayments = async (req: Request, res: Response) => {
   try {
@@ -258,6 +262,7 @@ export const verifyOrRejectPayment = async (req: Request, res: Response) => {
   try {
     const { paymentId } = req.params;
     const { action, reason } = req.body;
+    const normalizedPaymentId = Number(paymentId);
 
     const userId = getUserIdFromRequest(req);
     const userRoles: string[] = (req as any).user?.roles || [];
@@ -265,6 +270,14 @@ export const verifyOrRejectPayment = async (req: Request, res: Response) => {
     if (!userId) {
       await transaction.rollback();
       return res.status(401).json({ status: "error", message: "Unauthorized" });
+    }
+
+    if (!Number.isInteger(normalizedPaymentId) || normalizedPaymentId <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid payment ID",
+      });
     }
 
     if (!userRoles.includes("admin") && !userRoles.includes("registrar")) {
@@ -291,7 +304,7 @@ export const verifyOrRejectPayment = async (req: Request, res: Response) => {
       });
     }
 
-    const payment = await Payment.findByPk(paymentId, { transaction });
+    const payment = await Payment.findByPk(normalizedPaymentId, { transaction });
 
     if (!payment) {
       await transaction.rollback();
@@ -407,6 +420,41 @@ export const verifyOrRejectPayment = async (req: Request, res: Response) => {
       newValue: { payment_status: newStatus },
       req,
     });
+
+    const paymentNotificationContext = await getStudentPaymentNotificationContext(
+      payment.payment_id,
+      transaction
+    );
+
+    if (paymentNotificationContext) {
+      await createNotification({
+        userId: paymentNotificationContext.studentUserId,
+        title:
+          action === "verify" ? "Payment verified" : "Payment rejected",
+        message:
+          action === "verify"
+            ? `Your payment for ${paymentNotificationContext.documentNames} has been verified.`
+            : reason?.trim()
+              ? `Your payment for ${paymentNotificationContext.documentNames} was rejected. Reason: ${reason.trim()}`
+              : `Your payment for ${paymentNotificationContext.documentNames} was rejected.`,
+        type: "payment_update",
+        status: newStatus,
+        transaction,
+      });
+
+      if (action === "reject") {
+        await createNotification({
+          userId: paymentNotificationContext.studentUserId,
+          title: "Request rejected",
+          message: reason?.trim()
+            ? `Your request batch for ${paymentNotificationContext.documentNames} was rejected because the payment was rejected. Reason: ${reason.trim()}`
+            : `Your request batch for ${paymentNotificationContext.documentNames} was rejected because the payment was rejected.`,
+          type: "request_update",
+          status: "rejected",
+          transaction,
+        });
+      }
+    }
 
     await transaction.commit();
 

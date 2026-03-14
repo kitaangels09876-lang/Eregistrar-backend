@@ -10,17 +10,20 @@ export const generateReceipt = async (req: Request, res: Response) => {
   try {
     const batchId = Number(req.params.batchId);
     const issuedBy = (req as any).user.user_id;
+    const userRoles: string[] = (req as any).user?.roles || [];
 
-    const receipt = await generateReceiptForBatch({
-      batchId,
-      issuedBy
-    });
-
+    if (!Number.isInteger(batchId) || batchId <= 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid batch ID",
+      });
+    }
 
     const [batch]: any = await sequelize.query(
       `
       SELECT 
         pb.batch_id,
+        pb.student_id,
         sp.user_id AS student_user_id
       FROM payment_batches pb
       JOIN student_profiles sp ON pb.student_id = sp.student_id
@@ -31,6 +34,28 @@ export const generateReceipt = async (req: Request, res: Response) => {
         type: QueryTypes.SELECT
       }
     );
+
+    if (!batch) {
+      return res.status(404).json({
+        status: "error",
+        message: "Batch not found",
+      });
+    }
+
+    const isStaff =
+      userRoles.includes("admin") || userRoles.includes("registrar");
+
+    if (!isStaff && batch.student_user_id !== issuedBy) {
+      return res.status(403).json({
+        status: "error",
+        message: "You do not have permission to generate a receipt for this batch.",
+      });
+    }
+
+    const receipt = await generateReceiptForBatch({
+      batchId,
+      issuedBy
+    });
 
     const docs: any[] = await sequelize.query(
       `
@@ -157,6 +182,16 @@ const formatIssuedAt = (value: any) =>
 export const reprintReceipt = async (req: Request, res: Response) => {
   try {
     const receiptId = Number(req.params.receiptId);
+    const userId = getUserIdFromRequest(req);
+    const userRoles: string[] = (req as any).user?.roles || [];
+
+    if (!Number.isInteger(receiptId) || receiptId <= 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid receipt ID",
+      });
+    }
+
     const receiptRows: any[] = await sequelize.query(
       `SELECT * FROM receipts WHERE receipt_id = ?`,
       { replacements: [receiptId], type: QueryTypes.SELECT }
@@ -170,6 +205,29 @@ export const reprintReceipt = async (req: Request, res: Response) => {
     }
 
     const receipt = receiptRows[0];
+    const isStaff =
+      userRoles.includes("admin") || userRoles.includes("registrar");
+
+    if (!isStaff) {
+      const [studentProfile]: any = await sequelize.query(
+        `
+        SELECT student_id
+        FROM student_profiles
+        WHERE user_id = ?
+        `,
+        {
+          replacements: [userId],
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (!studentProfile || studentProfile.student_id !== receipt.student_id) {
+        return res.status(403).json({
+          status: "error",
+          message: "You do not have permission to reprint this receipt.",
+        });
+      }
+    }
 
     const [school]: any = await sequelize.query(
       `SELECT * FROM system_settings WHERE id = 1`,

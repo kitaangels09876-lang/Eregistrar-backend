@@ -36,7 +36,7 @@ router.put(
 router.post(
   "/receipts/batch/:batchId/generate",
   authenticateToken,
-  requireRole("admin", "registrar"),
+  requireRole("admin", "registrar", "student"),
   generateReceipt
 );
 
