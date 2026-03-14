@@ -6,18 +6,18 @@ export interface AdminAttributes {
     admin_id?: number;
     user_id: number;
     first_name: string;
-    middle_name?: string;
+    middle_name?: string | null;
     last_name: string;
-    contact_number?: string;
+    contact_number?: string | null;
 }
 
 export class Admin extends Model<AdminAttributes> implements AdminAttributes {
     public admin_id!: number;
     public user_id!: number;
     public first_name!: string;
-    public middle_name?: string;
+    public middle_name?: string | null;
     public last_name!: string;
-    public contact_number?: string;
+    public contact_number?: string | null;
 }
 
 Admin.init({

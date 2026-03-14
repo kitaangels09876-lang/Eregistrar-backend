@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { RequestStatusLog, sequelize } from "../models";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 import { QueryTypes } from "sequelize";
+import {
+  createNotification,
+  getStudentRequestNotificationContext,
+} from "../services/notification.service";
 
 const STATUS_FLOW = [
   "pending",
@@ -76,6 +80,8 @@ export const getAllRequestStatusLogs = async (req: Request, res: Response) => {
 
 
 export const addStatusMessage = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+
   try {
     const { requestId } = req.params;
     const { status, message } = req.body;
@@ -83,6 +89,7 @@ export const addStatusMessage = async (req: Request, res: Response) => {
     const adminId = getUserIdFromRequest(req);
 
     if (!adminId) {
+      await transaction.rollback();
       return res.status(401).json({
         status: "error",
         message: "Unauthorized",
@@ -91,6 +98,7 @@ export const addStatusMessage = async (req: Request, res: Response) => {
 
     const validStatuses = ["pending", "processing", "releasing", "completed"];
     if (!status || !validStatuses.includes(status.toLowerCase())) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
@@ -98,21 +106,20 @@ export const addStatusMessage = async (req: Request, res: Response) => {
     }
 
     if (!message || message.trim().length === 0) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Message is required",
       });
     }
 
-    const requestExists = await sequelize.query(
-      `SELECT request_id FROM document_requests WHERE request_id = :requestId`,
-      {
-        replacements: { requestId: Number(requestId) },
-        type: QueryTypes.SELECT,
-      }
+    const requestContext = await getStudentRequestNotificationContext(
+      Number(requestId),
+      transaction
     );
 
-    if (requestExists.length === 0) {
+    if (!requestContext) {
+      await transaction.rollback();
       return res.status(404).json({
         status: "error",
         message: "Request not found",
@@ -124,6 +131,8 @@ export const addStatusMessage = async (req: Request, res: Response) => {
       status: status.toLowerCase(),
       message: message.trim(),
       created_by: adminId,
+    }, {
+      transaction,
     });
 
     const createdMessage = await sequelize.query(
@@ -141,8 +150,18 @@ export const addStatusMessage = async (req: Request, res: Response) => {
       {
         replacements: { statusLogId: log.status_log_id },
         type: QueryTypes.SELECT,
+        transaction,
       }
     );
+
+    await createNotification({
+      userId: requestContext.studentUserId,
+      title: "New request update",
+      message: `There is a new update for ${requestContext.documentName}: ${message.trim()}`,
+      type: "request_update",
+      status: status.toLowerCase(),
+      transaction,
+    });
 
     await logActivity({
       userId: adminId,
@@ -156,12 +175,15 @@ export const addStatusMessage = async (req: Request, res: Response) => {
       req,
     });
 
+    await transaction.commit();
+
     res.status(201).json({
       status: "success",
       message: "Message added successfully",
       data: createdMessage[0],
     });
   } catch (error) {
+    await transaction.rollback();
     console.error("ADD STATUS MESSAGE ERROR:", error);
     res.status(500).json({
       status: "error",
@@ -172,6 +194,8 @@ export const addStatusMessage = async (req: Request, res: Response) => {
 
 
 export const updateRequestStatus = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+
   try {
     const { requestId } = req.params;
     const { status, message } = req.body;
@@ -179,6 +203,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
     const adminId = getUserIdFromRequest(req);
 
     if (!adminId) {
+      await transaction.rollback();
       return res.status(401).json({
         status: "error",
         message: "Unauthorized",
@@ -188,6 +213,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
     const ALLOWED_STATUSES = [...STATUS_FLOW, "rejected"];
 
     if (!ALLOWED_STATUSES.includes(status)) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: `Invalid status. Allowed: ${ALLOWED_STATUSES.join(", ")}`,
@@ -203,10 +229,17 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
       {
         replacements: { requestId: Number(requestId) },
         type: QueryTypes.SELECT,
+        transaction,
       }
     );
 
-    if (!request) {
+    const requestContext = await getStudentRequestNotificationContext(
+      Number(requestId),
+      transaction
+    );
+
+    if (!request || !requestContext) {
+      await transaction.rollback();
       return res.status(404).json({
         status: "error",
         message: "Request not found",
@@ -217,6 +250,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
 
 
     if (currentStatus === "rejected") {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Rejected requests can no longer be updated",
@@ -225,6 +259,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
 
 
     if (currentStatus === "completed") {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Completed requests can no longer be updated",
@@ -250,6 +285,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
             requestId: Number(requestId),
           },
           type: QueryTypes.UPDATE,
+          transaction,
         }
       );
 
@@ -258,6 +294,19 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
         status: "rejected",
         message: message?.trim() || "Request rejected",
         created_by: adminId,
+      }, {
+        transaction,
+      });
+
+      await createNotification({
+        userId: requestContext.studentUserId,
+        title: "Request rejected",
+        message: message?.trim()
+          ? `Your request for ${requestContext.documentName} was rejected. Reason: ${message.trim()}`
+          : `Your request for ${requestContext.documentName} was rejected.`,
+        type: "request_update",
+        status: "rejected",
+        transaction,
       });
 
       await logActivity({
@@ -271,6 +320,8 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
         },
         req,
       });
+
+      await transaction.commit();
 
       return res.json({
         status: "success",
@@ -288,6 +339,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
     const nextIndex = STATUS_FLOW.indexOf(status);
 
     if (nextIndex !== currentIndex + 1) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: `Invalid status transition. Current: ${currentStatus}`,
@@ -307,6 +359,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
           requestId: Number(requestId),
         },
         type: QueryTypes.UPDATE,
+        transaction,
       }
     );
 
@@ -315,6 +368,19 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
       status,
       message: message?.trim() || `Status updated to ${status}`,
       created_by: adminId,
+    }, {
+      transaction,
+    });
+
+    await createNotification({
+      userId: requestContext.studentUserId,
+      title: "Request status updated",
+      message: message?.trim()
+        ? `Your request for ${requestContext.documentName} is now ${status}. Note: ${message.trim()}`
+        : `Your request for ${requestContext.documentName} is now ${status}.`,
+      type: "request_update",
+      status,
+      transaction,
     });
 
     await logActivity({
@@ -328,6 +394,8 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
       req,
     });
 
+    await transaction.commit();
+
     res.json({
       status: "success",
       message: `Request status updated to ${status}`,
@@ -339,6 +407,7 @@ export const updateRequestStatus = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    await transaction.rollback();
     console.error("UPDATE REQUEST STATUS ERROR:", error);
     res.status(500).json({
       status: "error",

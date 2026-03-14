@@ -73,13 +73,14 @@ export const generateReceiptForBatch = async ({
       SELECT
         u.user_id,
         CONCAT(
-          COALESCE(ap.first_name, ''),
+          COALESCE(ap.first_name, sp.first_name, ''),
           ' ',
-          COALESCE(ap.last_name, '')
+          COALESCE(ap.last_name, sp.last_name, '')
         ) AS full_name,
         r.role_name
       FROM users u
       LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+      LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
       LEFT JOIN user_roles ur ON ur.user_id = u.user_id
       LEFT JOIN roles r ON r.role_id = ur.role_id
       WHERE u.user_id = ?

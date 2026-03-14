@@ -9,6 +9,11 @@ import {
   PaymentMethod
 } from "../models";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
+import {
+  createNotification,
+  getStudentBatchNotificationContext,
+  getStudentPaymentNotificationContext,
+} from "../services/notification.service";
 
 
 
@@ -35,6 +40,14 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
   paid: "Paid",
   cancelled: "Cancelled",
 };
+
+const ALLOWED_REQUEST_STATUSES = [
+  "pending",
+  "processing",
+  "releasing",
+  "completed",
+  "rejected",
+] as const;
 
 
 export const createDocumentRequest = async (req: Request, res: Response) => {
@@ -233,6 +246,19 @@ export const createDocumentRequest = async (req: Request, res: Response) => {
         transaction,
       }
     );
+
+    const documentNames = createdRequests
+      .map((request) => request.document_name)
+      .join(", ");
+
+    await createNotification({
+      userId,
+      title: "Document request submitted",
+      message: `Your request batch for ${documentNames} has been submitted and is waiting for payment.`,
+      type: "request_update",
+      status: "pending",
+      transaction,
+    });
 
     await transaction.commit();
 
@@ -448,6 +474,24 @@ export const createPayment = async (req: Request, res: Response) => {
       req,
     });
 
+    const batchNotificationContext = await getStudentBatchNotificationContext(
+      Number(batch_id),
+      transaction
+    );
+
+    if (batchNotificationContext) {
+      await createNotification({
+        userId: batchNotificationContext.studentUserId,
+        title: isCash ? "Payment verified" : "Payment created",
+        message: isCash
+          ? `Payment for ${batchNotificationContext.documentNames} has been recorded and verified.`
+          : `Payment for ${batchNotificationContext.documentNames} has been created. Upload your proof of payment to continue.`,
+        type: "payment_update",
+        status: payment.payment_status,
+        transaction,
+      });
+    }
+
     await transaction.commit();
 
     return res.status(201).json({
@@ -486,6 +530,7 @@ export const uploadPaymentProof = async (req: Request, res: Response) => {
 
   try {
     const { paymentId } = req.params;
+    const normalizedPaymentId = Number(paymentId);
     const userId = getUserIdFromRequest(req);
 
     if (!userId) {
@@ -504,7 +549,15 @@ export const uploadPaymentProof = async (req: Request, res: Response) => {
       });
     }
 
-    const payment = await Payment.findByPk(paymentId);
+    if (!Number.isInteger(normalizedPaymentId) || normalizedPaymentId <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid payment ID",
+      });
+    }
+
+    const payment = await Payment.findByPk(normalizedPaymentId);
 
     if (!payment) {
       await transaction.rollback();
@@ -591,6 +644,22 @@ export const uploadPaymentProof = async (req: Request, res: Response) => {
 
     const info = details[0];
 
+    const paymentNotificationContext = await getStudentPaymentNotificationContext(
+      payment.payment_id,
+      transaction
+    );
+
+    if (paymentNotificationContext) {
+      await createNotification({
+        userId: paymentNotificationContext.studentUserId,
+        title: "Payment proof submitted",
+        message: `Your payment proof for ${paymentNotificationContext.documentNames} has been submitted and is now under review.`,
+        type: "payment_update",
+        status: "submitted",
+        transaction,
+      });
+    }
+
     await transaction.commit();
 
     return res.status(200).json({
@@ -654,6 +723,13 @@ export const getStudentDocumentRequestsByBatch = async (
       request_status,
     } = req.query as any;
 
+    const normalizedRequestStatus =
+      typeof request_status === "string"
+        ? request_status.trim().toLowerCase()
+        : undefined;
+    const normalizedSearch =
+      typeof search === "string" ? search.trim() : "";
+
     const pageNumber = Math.max(Number(page), 1);
     const pageSize = Math.max(Number(limit), 1);
     const offset = (pageNumber - 1) * pageSize;
@@ -666,6 +742,19 @@ export const getStudentDocumentRequestsByBatch = async (
       return res.status(404).json({
         status: "error",
         message: "Student profile not found",
+      });
+    }
+
+    if (
+      normalizedRequestStatus &&
+      !ALLOWED_REQUEST_STATUSES.includes(
+        normalizedRequestStatus as (typeof ALLOWED_REQUEST_STATUSES)[number]
+      )
+    ) {
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Request status must be one of: pending, processing, releasing, completed, or rejected.",
       });
     }
 
@@ -690,6 +779,35 @@ export const getStudentDocumentRequestsByBatch = async (
         )
       `);
       replacements.payment_status = payment_status;
+    }
+
+    if (normalizedRequestStatus || normalizedSearch) {
+      const requestExistsFilters = [`brx.batch_id = pb.batch_id`];
+
+      if (normalizedRequestStatus) {
+        requestExistsFilters.push(`drx.request_status = :request_status`);
+        replacements.request_status = normalizedRequestStatus;
+      }
+
+      if (normalizedSearch) {
+        requestExistsFilters.push(`
+          (
+            dtx.document_name LIKE :search
+            OR drx.purpose LIKE :search
+          )
+        `);
+        replacements.search = `%${normalizedSearch}%`;
+      }
+
+      batchFilters.push(`
+        EXISTS (
+          SELECT 1
+          FROM batch_requests brx
+          JOIN document_requests drx ON drx.request_id = brx.request_id
+          JOIN document_types dtx ON dtx.document_type_id = drx.document_type_id
+          WHERE ${requestExistsFilters.join(" AND ")}
+        )
+      `);
     }
 
     const whereBatchClause = batchFilters.join(" AND ");
@@ -746,19 +864,19 @@ export const getStudentDocumentRequestsByBatch = async (
       const requestFilters: string[] = [`br.batch_id = :batch_id`];
       const requestReplacements: any = { batch_id: batch.batch_id };
 
-      if (request_status) {
+      if (normalizedRequestStatus) {
         requestFilters.push(`dr.request_status = :request_status`);
-        requestReplacements.request_status = request_status;
+        requestReplacements.request_status = normalizedRequestStatus;
       }
 
-      if (search) {
+      if (normalizedSearch) {
         requestFilters.push(`
           (
             dt.document_name LIKE :search
             OR dr.purpose LIKE :search
           )
         `);
-        requestReplacements.search = `%${search}%`;
+        requestReplacements.search = `%${normalizedSearch}%`;
       }
 
       const requests = await sequelize.query(
@@ -805,15 +923,19 @@ export const getStudentDocumentRequestsByBatch = async (
       batch.requests = requests;
     }
 
+    const totalBatches = Number(countResult[0]?.total) || 0;
+    const totalPages = Math.max(1, Math.ceil(totalBatches / pageSize));
+
     return res.status(200).json({
       status: "success",
       data: {
         pagination: {
           page: pageNumber,
           limit: pageSize,
-          total_batches: countResult[0].total,
+          total_batches: totalBatches,
+          total_pages: totalPages,
         },
-        batches: batches.filter(b => b.requests.length > 0),
+        batches,
       },
     });
   } catch (err) {

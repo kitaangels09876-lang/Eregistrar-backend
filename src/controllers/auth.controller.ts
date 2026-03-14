@@ -1,10 +1,19 @@
   import { Request, Response } from "express";
   import { User, Admin, Role, sequelize,StudentProfile } from "../models";
-  import { QueryTypes } from "sequelize"; 
+  import {
+    ForeignKeyConstraintError,
+    QueryTypes,
+    UniqueConstraintError,
+    ValidationError as SequelizeValidationError,
+  } from "sequelize"; 
   import bcrypt from "bcryptjs";
   import { generateToken } from '../config/jwt.config';
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 import { sendEmailVerificationEmail, verifyEmailVerificationToken } from "../services/emailVerification.service";
+import {
+  sendSingleFieldValidationError,
+  sendValidationError,
+} from "../utils/validationResponse";
 
 
   const setTokenCookie = (res: Response, token: string) => {
@@ -146,16 +155,11 @@ export const registerStudent = async (req: Request, res: Response) => {
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       await rollbackTransaction();
-      return res.status(400).json({
-        status: "error",
-        message: "Please correct the highlighted fields and try again.",
-        errors: [
-          {
-            field: "email",
-            message: "This email is already registered.",
-          },
-        ],
-      });
+      return sendSingleFieldValidationError(
+        res,
+        "email",
+        "This email is already registered."
+      );
     }
 
     const existingStudent = await StudentProfile.findOne({
@@ -163,16 +167,11 @@ export const registerStudent = async (req: Request, res: Response) => {
     });
     if (existingStudent) {
       await rollbackTransaction();
-      return res.status(400).json({
-        status: "error",
-        message: "Please correct the highlighted fields and try again.",
-        errors: [
-          {
-            field: "student_number",
-            message: "This student number is already registered.",
-          },
-        ],
-      });
+      return sendSingleFieldValidationError(
+        res,
+        "student_number",
+        "This student number is already registered."
+      );
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -252,6 +251,70 @@ export const registerStudent = async (req: Request, res: Response) => {
   } catch (error: any) {
     await rollbackTransaction();
     console.error("REGISTER STUDENT ERROR:", error);
+
+    if (
+      error instanceof UniqueConstraintError ||
+      error?.name === "SequelizeUniqueConstraintError"
+    ) {
+      const duplicateErrors = [
+        error?.fields?.email
+          ? {
+              field: "email",
+              message: "This email is already registered.",
+            }
+          : null,
+        error?.fields?.student_number
+          ? {
+              field: "student_number",
+              message: "This student number is already registered.",
+            }
+          : null,
+      ].filter(Boolean) as Array<{ field: string; message: string }>;
+
+      return sendValidationError(
+        res,
+        duplicateErrors.length > 0
+          ? duplicateErrors
+          : [
+              {
+                field: "form",
+                message: "A student account with those details already exists.",
+              },
+            ],
+        409
+      );
+    }
+
+    if (
+      error instanceof ForeignKeyConstraintError ||
+      error?.name === "SequelizeForeignKeyConstraintError"
+    ) {
+      return sendSingleFieldValidationError(
+        res,
+        "course_id",
+        "Selected course does not exist."
+      );
+    }
+
+    if (
+      error instanceof SequelizeValidationError ||
+      error?.name === "SequelizeValidationError"
+    ) {
+      const validationErrors =
+        error?.errors
+          ?.map((item: any) => ({
+            field: item?.path || "form",
+            message: item?.message || "Invalid value.",
+          }))
+          .filter(
+            (item: { field: string; message: string }) =>
+              Boolean(item.field) && Boolean(item.message)
+          ) ?? [];
+
+      if (validationErrors.length > 0) {
+        return sendValidationError(res, validationErrors);
+      }
+    }
 
     return res.status(500).json({
       status: "error",

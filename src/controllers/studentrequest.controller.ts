@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { sequelize } from "../models";
 import { QueryTypes } from "sequelize";
 import { getUserIdFromRequest, logActivity } from "../utils/auditlog.service";
+import {
+  createNotification,
+  getStudentBatchNotificationContext,
+} from "../services/notification.service";
 
 export const getAllStudentRequests = async (req: Request, res: Response) => {
   try {
@@ -684,14 +688,21 @@ export const cancelBatchRequest = async (req: Request, res: Response) => {
       );
     }
 
-    await sequelize.query(
-      `INSERT INTO notifications
-       (user_id, title, message, type)
-       VALUES (?, 'Batch Cancelled',
-       'Your pending batch request has been cancelled.',
-       'request_update')`,
-      { replacements: [user.user_id], transaction }
+    const batchNotificationContext = await getStudentBatchNotificationContext(
+      batchId,
+      transaction
     );
+
+    if (batchNotificationContext) {
+      await createNotification({
+        userId: batchNotificationContext.studentUserId,
+        title: "Batch cancelled",
+        message: `Your batch for ${batchNotificationContext.documentNames} has been cancelled. Reason: ${cancel_reason}`,
+        type: "request_update",
+        status: "cancelled",
+        transaction,
+      });
+    }
 
     await sequelize.query(
       `INSERT INTO audit_logs

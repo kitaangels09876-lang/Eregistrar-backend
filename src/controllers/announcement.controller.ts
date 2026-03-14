@@ -8,7 +8,7 @@ const getSingleParam = (value: string | string[] | undefined) =>
 
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
-    const { title, start_date, end_date, message } = req.body;
+    const { title, message } = req.body;
 
     const userId = getUserIdFromRequest(req);
 
@@ -30,8 +30,6 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 
     const announcement = await Announcement.create({
       title,
-      start_date: start_date || null,
-      end_date: end_date || null,
       message,
       posted_by: postedBy,
       created_by: userId
@@ -44,8 +42,6 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       recordId: announcement.announcement_id,
       newValue: {
         title: announcement.title,
-        start_date: announcement.start_date,
-        end_date: announcement.end_date,
         posted_by: postedBy
       },
       req
@@ -112,15 +108,7 @@ export const getAllAnnouncements = async (req: Request, res: Response) => {
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = getSingleParam(req.params.announcementId);
-    const { title, start_date, end_date, message } = req.body;
-    const hasStartDate = Object.prototype.hasOwnProperty.call(
-      req.body ?? {},
-      "start_date"
-    );
-    const hasEndDate = Object.prototype.hasOwnProperty.call(
-      req.body ?? {},
-      "end_date"
-    );
+    const { title, message } = req.body;
 
     const userId = getUserIdFromRequest(req);
 
@@ -149,15 +137,11 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
 
     const oldValue = {
       title: announcement.title,
-      start_date: announcement.start_date,
-      end_date: announcement.end_date,
       message: announcement.message
     };
 
     await announcement.update({
       title: title ?? announcement.title,
-      start_date: hasStartDate ? start_date || null : announcement.start_date,
-      end_date: hasEndDate ? end_date || null : announcement.end_date,
       message: message ?? announcement.message
     });
 
@@ -169,9 +153,8 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
       oldValue,
       newValue: {
         title: announcement.title,
-        start_date: announcement.start_date,
-        end_date: announcement.end_date,
-        message: announcement.message
+        message: announcement.message,
+        updated_at: announcement.updated_at
       },
       req
     });
@@ -220,8 +203,6 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 
     const oldValue = {
       title: announcement.title,
-      start_date: announcement.start_date,
-      end_date: announcement.end_date,
       message: announcement.message,
       posted_by: announcement.posted_by
     };

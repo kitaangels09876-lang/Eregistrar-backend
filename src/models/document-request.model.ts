@@ -10,7 +10,7 @@ export class DocumentRequest extends Model {
     public delivery_address?: string;
     public quantity!: number;
     public total_amount!: number;
-    public request_status!: 'pending' | 'processing' | 'releasing' | 'completed';
+    public request_status!: 'pending' | 'processing' | 'releasing' | 'completed' | 'rejected';
     public admin_id?: number;
     public rejection_reason?: string;
     public created_at!: Date;
@@ -53,7 +53,7 @@ DocumentRequest.init({
         allowNull: false
     },
     request_status: {
-        type: DataTypes.ENUM('pending', 'processing', 'releasing', 'completed'),
+        type: DataTypes.ENUM('pending', 'processing', 'releasing', 'completed', 'rejected'),
         defaultValue: 'pending'
     },
     admin_id: {

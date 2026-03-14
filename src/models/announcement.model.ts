@@ -4,17 +4,16 @@ import sequelize from "../config/db.config";
 interface AnnouncementAttributes {
   announcement_id: number;
   title: string;
-  start_date?: Date | null;
-  end_date?: Date | null;
   message: string;
   posted_by: string;
   created_by: number;
   created_at?: Date;
+  updated_at?: Date | null;
 }
 
 type AnnouncementCreationAttributes = Optional<
   AnnouncementAttributes,
-  "announcement_id" | "created_at" | "start_date" | "end_date"
+  "announcement_id" | "created_at" | "updated_at"
 >;
 
 export class Announcement extends Model<
@@ -23,12 +22,11 @@ export class Announcement extends Model<
 > implements AnnouncementAttributes {
   public announcement_id!: number;
   public title!: string;
-  public start_date!: Date | null;
-  public end_date!: Date | null;
   public message!: string;
   public posted_by!: string;
   public created_by!: number;
   public created_at!: Date;
+  public updated_at!: Date | null;
 }
 
 Announcement.init(
@@ -41,14 +39,6 @@ Announcement.init(
     title: {
       type: DataTypes.STRING(255),
       allowNull: false
-    },
-    start_date: {
-      type: DataTypes.DATEONLY,
-      allowNull: true
-    },
-    end_date: {
-      type: DataTypes.DATEONLY,
-      allowNull: true
     },
     message: {
       type: DataTypes.TEXT,
@@ -65,12 +55,18 @@ Announcement.init(
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      allowNull: true
     }
   },
   {
     sequelize,
     tableName: "announcements",
-    timestamps: false
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at"
   }
 );
 

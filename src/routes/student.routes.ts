@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllStudents,getStudentById,updateStudentStatus, validateEmailAvailability,updateStudentAcademicStatus  } from "../controllers/student.controller";
+import { getAllStudents,getStudentById,updateStudent,updateStudentStatus, validateEmailAvailability,updateStudentAcademicStatus  } from "../controllers/student.controller";
 import { authenticateToken, requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -16,6 +16,13 @@ router.get(
   authenticateToken,
   requireRole("admin", "registrar"),
   getStudentById
+);
+
+router.put(
+  "/students/:studentId",
+  authenticateToken,
+  requireRole("admin", "registrar"),
+  updateStudent
 );
 
 router.patch(

@@ -15,7 +15,7 @@
         updated_at TIMESTAMP NULL
     ) ENGINE=InnoDB;
 
-    CREATE TABLE roles (
+    CREATE TABLE roles ( 
         role_id INT AUTO_INCREMENT PRIMARY KEY,
         role_name VARCHAR(100) UNIQUE NOT NULL,
         role_description TEXT NULL
@@ -503,12 +503,11 @@ CREATE TABLE notifications (
     CREATE TABLE announcements (
         announcement_id INT AUTO_INCREMENT PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
-        start_date DATE NULL,
-        end_date DATE NULL,
         message TEXT NOT NULL,
         posted_by VARCHAR(255) NOT NULL,
         created_by INT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL,
 
         FOREIGN KEY (created_by) REFERENCES users(user_id)
     ) ENGINE=InnoDB;
@@ -578,4 +577,3 @@ CREATE TABLE notifications (
         '/uploads/system/icon.png',
         NULL
     );
-
