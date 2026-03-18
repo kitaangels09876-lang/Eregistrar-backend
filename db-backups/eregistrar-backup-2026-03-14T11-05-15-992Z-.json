@@ -1,0 +1,2185 @@
+{
+  "created_at": "2026-03-14T11:05:15.967Z",
+  "database": "eregistrar",
+  "tables": {
+    "admin_profiles": [
+      {
+        "admin_id": 1,
+        "user_id": 1,
+        "first_name": "System",
+        "middle_name": null,
+        "last_name": "Administrator",
+        "contact_number": "09170000001",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "admin_id": 2,
+        "user_id": 2,
+        "first_name": "Jane",
+        "middle_name": null,
+        "last_name": "Registrar",
+        "contact_number": "09170000002",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "admin_id": 3,
+        "user_id": 13,
+        "first_name": "BERNADETH",
+        "middle_name": "ANGELS",
+        "last_name": "EVARDO",
+        "contact_number": "09515437552",
+        "created_at": "2026-03-12T13:14:27.000Z",
+        "updated_at": "2026-03-12T15:57:08.000Z"
+      }
+    ],
+    "announcements": [
+      {
+        "announcement_id": 1,
+        "title": "Enrollment Open",
+        "start_date": "2026-02-23T16:00:00.000Z",
+        "end_date": "2026-03-25T16:00:00.000Z",
+        "message": "Enrollment is now open for SY 2025.",
+        "posted_by": "Registrar Office",
+        "created_by": 1,
+        "created_at": "2026-02-24T07:39:33.000Z",
+        "updated_at": null
+      },
+      {
+        "announcement_id": 2,
+        "title": "registration",
+        "start_date": "2026-03-10T16:00:00.000Z",
+        "end_date": "2026-03-30T16:00:00.000Z",
+        "message": "THE TMC REGISTRAR IS OPEN FOR TES FILING",
+        "posted_by": "System Administrator",
+        "created_by": 1,
+        "created_at": "2026-03-09T12:15:03.000Z",
+        "updated_at": null
+      }
+    ],
+    "audit_logs": [
+      {
+        "log_id": 1,
+        "user_id": 1,
+        "action": "APPROVE_REFUND",
+        "table_name": "refund_requests",
+        "record_id": 1,
+        "old_value": null,
+        "new_value": "{\"status\": \"approved\"}",
+        "timestamp": "2026-02-24T07:39:33.000Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "Seeder"
+      },
+      {
+        "log_id": 2,
+        "user_id": 2,
+        "action": "RECEIPT_ISSUED",
+        "table_name": "receipts",
+        "record_id": 1,
+        "old_value": null,
+        "new_value": "{\"receipt_reference\": \"REC-1-20250210-A1B2\", \"total_paid\": 350.00, \"refundable_amount\": 50.00}",
+        "timestamp": "2026-02-24T07:39:33.000Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "Seeder"
+      },
+      {
+        "log_id": 3,
+        "user_id": 1,
+        "action": "ADD_REQUEST_STATUS_MESSAGE",
+        "table_name": "request_status_logs",
+        "record_id": 4,
+        "old_value": null,
+        "new_value": "{\"status\":\"completed\",\"message\":\"eheggr\"}",
+        "timestamp": "2026-02-24T08:06:19.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 4,
+        "user_id": 1,
+        "action": "UPDATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 2,
+        "old_value": "{\"document_name\":\"Certificate of Enrollment\",\"description\":\"Enrollment proof\",\"base_price\":\"50.00\",\"requirements\":null,\"estimated_processing_days\":2,\"is_active\":true}",
+        "new_value": "{\"document_name\":\"Certificate of Enrollment\",\"description\":\"Enrollment proof\",\"base_price\":50,\"requirements\":null,\"estimated_processing_days\":0,\"is_active\":true}",
+        "timestamp": "2026-03-04T14:23:50.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 5,
+        "user_id": 1,
+        "action": "UPDATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 1,
+        "old_value": "{\"document_name\":\"Transcript of Records\",\"description\":\"Official TOR\",\"base_price\":\"150.00\",\"requirements\":\"Clearance\",\"estimated_processing_days\":5,\"is_active\":true}",
+        "new_value": "{\"document_name\":\"Transcript of Records\",\"description\":\"Official TOR\",\"base_price\":150,\"requirements\":\"Clearance\",\"estimated_processing_days\":1,\"is_active\":true}",
+        "timestamp": "2026-03-04T14:23:59.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 6,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATE OF GOOD MORAL CHARACTER\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:27:46.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 7,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 4,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATE OF GRADES\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:28:55.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 8,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 5,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC -  CERTIFICATE OF GRADUATION\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:29:44.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 9,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 6,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATE OF TRANSFER CREDENTIALS\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:30:39.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 10,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 7,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATE OF UNITS EARNED\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:31:19.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 11,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 8,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATION/AUTHENTICATION/VERIFICATION (CAV)\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:32:12.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 12,
+        "user_id": 1,
+        "action": "CREATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 9,
+        "old_value": null,
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATION\",\"base_price\":150,\"estimated_processing_days\":7}",
+        "timestamp": "2026-03-05T12:32:41.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 13,
+        "user_id": 1,
+        "action": "CREATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 2,
+        "old_value": null,
+        "new_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"posted_by\":\"System Administrator\"}",
+        "timestamp": "2026-03-09T12:15:03.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+      },
+      {
+        "log_id": 14,
+        "user_id": 5,
+        "action": "CREATE_PAYMENT",
+        "table_name": "payments",
+        "record_id": 2,
+        "old_value": null,
+        "new_value": "{\"batch_id\":2,\"method_id\":1,\"payment_status\":\"pending\"}",
+        "timestamp": "2026-03-10T13:48:27.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 15,
+        "user_id": 5,
+        "action": "UPLOAD_PAYMENT_PROOF",
+        "table_name": "payments",
+        "record_id": 2,
+        "old_value": null,
+        "new_value": "{\"payment_status\":\"submitted\",\"payment_proof\":\"/uploads/payments/payment_2_1773150519118.jpg\"}",
+        "timestamp": "2026-03-10T13:48:39.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 16,
+        "user_id": 1,
+        "action": "VERIFY_PAYMENT",
+        "table_name": "payments",
+        "record_id": 2,
+        "old_value": "{\"payment_status\":\"submitted\"}",
+        "new_value": "{\"payment_status\":\"verified\"}",
+        "timestamp": "2026-03-10T14:14:44.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 17,
+        "user_id": 1,
+        "action": "ADD_REQUEST_STATUS_MESSAGE",
+        "table_name": "request_status_logs",
+        "record_id": 5,
+        "old_value": null,
+        "new_value": "{\"status\":\"pending\",\"message\":\"hjjuhhnnn\"}",
+        "timestamp": "2026-03-10T14:16:15.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 18,
+        "user_id": 1,
+        "action": "ADD_REQUEST_STATUS_MESSAGE",
+        "table_name": "request_status_logs",
+        "record_id": 6,
+        "old_value": null,
+        "new_value": "{\"status\":\"pending\",\"message\":\"ghhybnnn\"}",
+        "timestamp": "2026-03-10T14:16:49.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 19,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"processing\"}",
+        "timestamp": "2026-03-10T14:16:55.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 20,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"releasing\"}",
+        "timestamp": "2026-03-10T14:17:14.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 21,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"completed\"}",
+        "timestamp": "2026-03-10T14:22:15.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 22,
+        "user_id": 1,
+        "action": "CREATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"title\":\"sfbbfbcb\",\"start_date\":null,\"end_date\":null,\"posted_by\":\"System Administrator\"}",
+        "timestamp": "2026-03-12T07:38:06.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 23,
+        "user_id": 1,
+        "action": "DELETE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 3,
+        "old_value": "{\"title\":\"sfbbfbcb\",\"start_date\":null,\"end_date\":null,\"message\":\"fhggn\",\"posted_by\":\"System Administrator\"}",
+        "new_value": null,
+        "timestamp": "2026-03-12T07:38:16.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 24,
+        "user_id": 12,
+        "action": "VERIFY_EMAIL",
+        "table_name": "users",
+        "record_id": 12,
+        "old_value": "{\"status\":\"inactive\"}",
+        "new_value": "{\"status\":\"active\"}",
+        "timestamp": "2026-03-12T09:44:06.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 25,
+        "user_id": 1,
+        "action": "CREATE_STAFF_ACCOUNT",
+        "table_name": "users",
+        "record_id": 13,
+        "old_value": null,
+        "new_value": "{\"email\":\"registrar@gmail.com\",\"role\":\"registrar\",\"created_by\":1}",
+        "timestamp": "2026-03-12T13:14:27.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 26,
+        "user_id": 14,
+        "action": "VERIFY_EMAIL",
+        "table_name": "users",
+        "record_id": 14,
+        "old_value": "{\"status\":\"inactive\"}",
+        "new_value": "{\"status\":\"active\"}",
+        "timestamp": "2026-03-12T14:09:31.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 27,
+        "user_id": 14,
+        "action": "CREATE_PAYMENT",
+        "table_name": "payments",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"batch_id\":3,\"method_id\":1,\"payment_status\":\"pending\"}",
+        "timestamp": "2026-03-12T14:14:14.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 28,
+        "user_id": 14,
+        "action": "UPLOAD_PAYMENT_PROOF",
+        "table_name": "payments",
+        "record_id": 3,
+        "old_value": null,
+        "new_value": "{\"payment_status\":\"submitted\",\"payment_proof\":\"/uploads/payments/payment_3_1773324880840.jpg\"}",
+        "timestamp": "2026-03-12T14:14:40.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 29,
+        "user_id": 1,
+        "action": "UPDATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 9,
+        "old_value": "{\"document_name\":\"TMC - CERTIFICATION\",\"description\":\"\",\"base_price\":\"150.00\",\"requirements\":\"\",\"estimated_processing_days\":7,\"is_active\":true}",
+        "new_value": "{\"document_name\":\"TMC - CERTIFICATION\",\"description\":\"\",\"base_price\":150,\"requirements\":\"\",\"estimated_processing_days\":7,\"is_active\":true}",
+        "timestamp": "2026-03-12T15:28:46.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 30,
+        "user_id": 1,
+        "action": "UPDATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 2,
+        "old_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "new_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "timestamp": "2026-03-12T16:50:38.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 31,
+        "user_id": 1,
+        "action": "UPDATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 2,
+        "old_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "new_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "timestamp": "2026-03-12T16:51:34.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 32,
+        "user_id": 1,
+        "action": "UPDATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 2,
+        "old_value": "{\"title\":\"TES FILING\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "new_value": "{\"title\":\"registration\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "timestamp": "2026-03-12T16:52:26.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 33,
+        "user_id": 1,
+        "action": "UPDATE_ANNOUNCEMENT",
+        "table_name": "announcements",
+        "record_id": 2,
+        "old_value": "{\"title\":\"registration\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "new_value": "{\"title\":\"registration\",\"start_date\":\"2026-03-11\",\"end_date\":\"2026-03-31\",\"message\":\"THE TMC REGISTRAR IS OPEN FOR TES FILING\"}",
+        "timestamp": "2026-03-12T16:52:40.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 34,
+        "user_id": 1,
+        "action": "UPDATE_DOCUMENT_TYPE",
+        "table_name": "document_types",
+        "record_id": 2,
+        "old_value": "{\"document_name\":\"Certificate of Enrollment\",\"description\":\"Enrollment proof\",\"base_price\":\"50.00\",\"requirements\":null,\"estimated_processing_days\":0,\"is_active\":true}",
+        "new_value": "{\"document_name\":\"Certificate of Enrollment\",\"description\":\"Enrollment proof\",\"base_price\":50,\"requirements\":null,\"estimated_processing_days\":1,\"is_active\":true}",
+        "timestamp": "2026-03-12T17:32:33.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 35,
+        "user_id": 5,
+        "action": "CREATE_PAYMENT",
+        "table_name": "payments",
+        "record_id": 4,
+        "old_value": null,
+        "new_value": "{\"batch_id\":5,\"method_id\":1,\"payment_status\":\"pending\"}",
+        "timestamp": "2026-03-13T07:41:58.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 36,
+        "user_id": 5,
+        "action": "UPLOAD_PAYMENT_PROOF",
+        "table_name": "payments",
+        "record_id": 4,
+        "old_value": null,
+        "new_value": "{\"payment_status\":\"submitted\",\"payment_proof\":\"/uploads/payments/payment_4_1773387735851.jpg\"}",
+        "timestamp": "2026-03-13T07:42:15.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 37,
+        "user_id": 5,
+        "action": "CREATE_PAYMENT",
+        "table_name": "payments",
+        "record_id": 5,
+        "old_value": null,
+        "new_value": "{\"batch_id\":6,\"method_id\":1,\"payment_status\":\"pending\"}",
+        "timestamp": "2026-03-13T07:50:07.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 38,
+        "user_id": 5,
+        "action": "UPLOAD_PAYMENT_PROOF",
+        "table_name": "payments",
+        "record_id": 5,
+        "old_value": null,
+        "new_value": "{\"payment_status\":\"submitted\",\"payment_proof\":\"/uploads/payments/payment_5_1773388230881.jpg\"}",
+        "timestamp": "2026-03-13T07:50:30.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 39,
+        "user_id": 1,
+        "action": "VERIFY_PAYMENT",
+        "table_name": "payments",
+        "record_id": 5,
+        "old_value": "{\"payment_status\":\"submitted\"}",
+        "new_value": "{\"payment_status\":\"verified\"}",
+        "timestamp": "2026-03-13T07:51:57.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 40,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 9,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"processing\"}",
+        "timestamp": "2026-03-13T07:52:27.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 41,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 9,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"releasing\"}",
+        "timestamp": "2026-03-13T07:52:41.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 42,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 9,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"completed\"}",
+        "timestamp": "2026-03-13T07:52:50.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 43,
+        "user_id": 1,
+        "action": "ADD_REQUEST_STATUS_MESSAGE",
+        "table_name": "request_status_logs",
+        "record_id": 13,
+        "old_value": null,
+        "new_value": "{\"status\":\"completed\",\"message\":\"fgffgh\"}",
+        "timestamp": "2026-03-13T07:52:57.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 44,
+        "user_id": 1,
+        "action": "ADD_REQUEST_STATUS_MESSAGE",
+        "table_name": "request_status_logs",
+        "record_id": 14,
+        "old_value": null,
+        "new_value": "{\"status\":\"completed\",\"message\":\"nakuha nna ni justmay\"}",
+        "timestamp": "2026-03-13T07:53:18.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 45,
+        "user_id": 1,
+        "action": "REJECT_DOCUMENT_REQUEST",
+        "table_name": "document_requests",
+        "record_id": 10,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"rejected\",\"rejection_reason\":\"bghrffhh\"}",
+        "timestamp": "2026-03-13T08:18:27.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 46,
+        "user_id": 15,
+        "action": "VERIFY_EMAIL",
+        "table_name": "users",
+        "record_id": 15,
+        "old_value": "{\"status\":\"inactive\"}",
+        "new_value": "{\"status\":\"active\"}",
+        "timestamp": "2026-03-14T09:13:36.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 47,
+        "user_id": 16,
+        "action": "VERIFY_EMAIL",
+        "table_name": "users",
+        "record_id": 16,
+        "old_value": "{\"status\":\"inactive\"}",
+        "new_value": "{\"status\":\"active\"}",
+        "timestamp": "2026-03-14T09:38:50.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 48,
+        "user_id": 1,
+        "action": "VERIFY_PAYMENT",
+        "table_name": "payments",
+        "record_id": 4,
+        "old_value": "{\"payment_status\":\"submitted\"}",
+        "new_value": "{\"payment_status\":\"verified\"}",
+        "timestamp": "2026-03-14T10:12:04.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 49,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 7,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"processing\"}",
+        "timestamp": "2026-03-14T10:13:05.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 50,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 7,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"releasing\"}",
+        "timestamp": "2026-03-14T10:13:10.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 51,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 7,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"completed\"}",
+        "timestamp": "2026-03-14T10:13:18.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 52,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 8,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"processing\"}",
+        "timestamp": "2026-03-14T10:13:28.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 53,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 8,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"releasing\"}",
+        "timestamp": "2026-03-14T10:13:32.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      },
+      {
+        "log_id": 54,
+        "user_id": 1,
+        "action": "UPDATE_REQUEST_STATUS",
+        "table_name": "document_requests",
+        "record_id": 8,
+        "old_value": null,
+        "new_value": "{\"request_status\":\"completed\"}",
+        "timestamp": "2026-03-14T10:13:38.000Z",
+        "ip_address": "::1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+      }
+    ],
+    "barangays": [
+      {
+        "barangay_id": 1,
+        "municipality_id": 1,
+        "barangay_name": "Poblacion"
+      }
+    ],
+    "batch_requests": [
+      {
+        "batch_request_id": 1,
+        "batch_id": 1,
+        "request_id": 1,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "batch_request_id": 2,
+        "batch_id": 1,
+        "request_id": 2,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "batch_request_id": 3,
+        "batch_id": 2,
+        "request_id": 3,
+        "created_at": "2026-03-10T13:47:20.000Z"
+      },
+      {
+        "batch_request_id": 4,
+        "batch_id": 3,
+        "request_id": 4,
+        "created_at": "2026-03-12T14:12:56.000Z"
+      },
+      {
+        "batch_request_id": 5,
+        "batch_id": 3,
+        "request_id": 5,
+        "created_at": "2026-03-12T14:12:56.000Z"
+      },
+      {
+        "batch_request_id": 6,
+        "batch_id": 4,
+        "request_id": 6,
+        "created_at": "2026-03-12T15:11:30.000Z"
+      },
+      {
+        "batch_request_id": 7,
+        "batch_id": 5,
+        "request_id": 7,
+        "created_at": "2026-03-13T07:38:21.000Z"
+      },
+      {
+        "batch_request_id": 8,
+        "batch_id": 5,
+        "request_id": 8,
+        "created_at": "2026-03-13T07:38:21.000Z"
+      },
+      {
+        "batch_request_id": 9,
+        "batch_id": 6,
+        "request_id": 9,
+        "created_at": "2026-03-13T07:49:00.000Z"
+      },
+      {
+        "batch_request_id": 10,
+        "batch_id": 6,
+        "request_id": 10,
+        "created_at": "2026-03-13T07:49:00.000Z"
+      }
+    ],
+    "courses": [
+      {
+        "course_id": 1,
+        "course_code": "BSIT",
+        "course_name": "Bachelor of Science in Information Technology",
+        "course_description": null,
+        "department": "College of Computer Studies",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "course_id": 2,
+        "course_code": "BSOA",
+        "course_name": "Bachelor of Science in Office Administration",
+        "course_description": null,
+        "department": "College of Office Administration",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "course_id": 3,
+        "course_code": "BSCRIM",
+        "course_name": "Bachelor of Science in Criminology",
+        "course_description": null,
+        "department": "College of Criminal Justice Education",
+        "created_at": "2026-03-12T04:21:37.000Z"
+      },
+      {
+        "course_id": 4,
+        "course_code": "BSED",
+        "course_name": "Bachelor of Secondary Education",
+        "course_description": null,
+        "department": "College of Education",
+        "created_at": "2026-03-12T04:23:39.000Z"
+      },
+      {
+        "course_id": 5,
+        "course_code": "BACOM",
+        "course_name": "Bachelor of Arts in Communication",
+        "course_description": null,
+        "department": "College of Arts and Sciences",
+        "created_at": "2026-03-12T04:25:50.000Z"
+      },
+      {
+        "course_id": 6,
+        "course_code": "BEED",
+        "course_name": "Bachelor of Elementary Education",
+        "course_description": null,
+        "department": "College of Education",
+        "created_at": "2026-03-12T04:31:10.000Z"
+      }
+    ],
+    "document_requests": [
+      {
+        "request_id": 1,
+        "student_id": 1,
+        "document_type_id": 1,
+        "purpose": "Employment",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 2,
+        "total_amount": "300.00",
+        "request_status": "completed",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": "2026-03-03T07:39:32.000Z",
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 2,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "request_id": 2,
+        "student_id": 1,
+        "document_type_id": 2,
+        "purpose": "Scholarship",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "50.00",
+        "request_status": "rejected",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": "2026-02-27T07:39:32.000Z",
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 2,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "request_id": 3,
+        "student_id": 3,
+        "document_type_id": 9,
+        "purpose": "for the job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "completed",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 1,
+        "created_at": "2026-03-10T13:47:19.000Z",
+        "updated_at": "2026-03-10T14:22:15.000Z"
+      },
+      {
+        "request_id": 4,
+        "student_id": 11,
+        "document_type_id": 9,
+        "purpose": "for job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "pending",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": null,
+        "created_at": "2026-03-12T14:12:56.000Z",
+        "updated_at": "2026-03-12T14:12:56.000Z"
+      },
+      {
+        "request_id": 5,
+        "student_id": 11,
+        "document_type_id": 4,
+        "purpose": "for job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "pending",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": null,
+        "created_at": "2026-03-12T14:12:56.000Z",
+        "updated_at": "2026-03-12T14:12:56.000Z"
+      },
+      {
+        "request_id": 6,
+        "student_id": 11,
+        "document_type_id": 1,
+        "purpose": "fo8r job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "pending",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": null,
+        "created_at": "2026-03-12T15:11:30.000Z",
+        "updated_at": "2026-03-12T15:11:30.000Z"
+      },
+      {
+        "request_id": 7,
+        "student_id": 3,
+        "document_type_id": 8,
+        "purpose": "for job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "completed",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 1,
+        "created_at": "2026-03-13T07:38:21.000Z",
+        "updated_at": "2026-03-14T10:13:18.000Z"
+      },
+      {
+        "request_id": 8,
+        "student_id": 3,
+        "document_type_id": 7,
+        "purpose": "for job",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "completed",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 1,
+        "created_at": "2026-03-13T07:38:21.000Z",
+        "updated_at": "2026-03-14T10:13:38.000Z"
+      },
+      {
+        "request_id": 9,
+        "student_id": 3,
+        "document_type_id": 3,
+        "purpose": "gunbvvvb",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "completed",
+        "rejection_reason": null,
+        "rejected_by": null,
+        "rejected_at": null,
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": 1,
+        "created_at": "2026-03-13T07:49:00.000Z",
+        "updated_at": "2026-03-13T07:52:50.000Z"
+      },
+      {
+        "request_id": 10,
+        "student_id": 3,
+        "document_type_id": 9,
+        "purpose": "gunbvvvb",
+        "delivery_method": "pickup",
+        "delivery_address": null,
+        "quantity": 1,
+        "total_amount": "150.00",
+        "request_status": "rejected",
+        "rejection_reason": "bghrffhh",
+        "rejected_by": 1,
+        "rejected_at": "2026-03-13T08:18:27.000Z",
+        "expires_at": null,
+        "is_archived": 0,
+        "archived_at": null,
+        "admin_id": null,
+        "created_at": "2026-03-13T07:49:00.000Z",
+        "updated_at": "2026-03-13T08:18:27.000Z"
+      }
+    ],
+    "document_types": [
+      {
+        "document_type_id": 1,
+        "document_name": "Transcript of Records",
+        "description": "Official TOR",
+        "base_price": "150.00",
+        "requirements": "Clearance",
+        "estimated_processing_days": 1,
+        "is_active": 1,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": "2026-03-04T14:23:59.000Z"
+      },
+      {
+        "document_type_id": 2,
+        "document_name": "Certificate of Enrollment",
+        "description": "Enrollment proof",
+        "base_price": "50.00",
+        "requirements": null,
+        "estimated_processing_days": 1,
+        "is_active": 1,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": "2026-03-12T17:32:33.000Z"
+      },
+      {
+        "document_type_id": 3,
+        "document_name": "TMC - CERTIFICATE OF GOOD MORAL CHARACTER",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:27:46.000Z",
+        "updated_at": "2026-03-05T12:27:46.000Z"
+      },
+      {
+        "document_type_id": 4,
+        "document_name": "TMC - CERTIFICATE OF GRADES",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:28:55.000Z",
+        "updated_at": "2026-03-05T12:28:55.000Z"
+      },
+      {
+        "document_type_id": 5,
+        "document_name": "TMC -  CERTIFICATE OF GRADUATION",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:29:44.000Z",
+        "updated_at": "2026-03-05T12:29:44.000Z"
+      },
+      {
+        "document_type_id": 6,
+        "document_name": "TMC - CERTIFICATE OF TRANSFER CREDENTIALS",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:30:39.000Z",
+        "updated_at": "2026-03-05T12:30:39.000Z"
+      },
+      {
+        "document_type_id": 7,
+        "document_name": "TMC - CERTIFICATE OF UNITS EARNED",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:31:19.000Z",
+        "updated_at": "2026-03-05T12:31:19.000Z"
+      },
+      {
+        "document_type_id": 8,
+        "document_name": "TMC - CERTIFICATION/AUTHENTICATION/VERIFICATION (CAV)",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:32:12.000Z",
+        "updated_at": "2026-03-05T12:32:12.000Z"
+      },
+      {
+        "document_type_id": 9,
+        "document_name": "TMC - CERTIFICATION",
+        "description": "",
+        "base_price": "150.00",
+        "requirements": "",
+        "estimated_processing_days": 7,
+        "is_active": 1,
+        "created_at": "2026-03-05T12:32:41.000Z",
+        "updated_at": "2026-03-12T15:28:46.000Z"
+      }
+    ],
+    "municipalities": [
+      {
+        "municipality_id": 1,
+        "province_id": 1,
+        "municipality_name": "Trinidad"
+      }
+    ],
+    "notifications": [
+      {
+        "notification_id": 1,
+        "user_id": 3,
+        "title": "Refund Approved",
+        "message": "Your refund has been approved.",
+        "type": "payment_update",
+        "status": "approved",
+        "is_read": 0,
+        "created_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "notification_id": 2,
+        "user_id": 3,
+        "title": "Request Completed",
+        "message": "Your document is ready for release.",
+        "type": "request_update",
+        "status": "completed",
+        "is_read": 0,
+        "created_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "notification_id": 3,
+        "user_id": 5,
+        "title": "Documents Ready for Release",
+        "message": "Your requested documents (TMC - CERTIFICATION) are now ready for release.\n\nReceipt Reference: OR-1773301221394-2\nReceipt ID: 2\nIssued By: System Administrator (ADMIN)\n\nPlease proceed to the Registrar’s Office to claim your documents.",
+        "type": "request_update",
+        "status": "completed",
+        "is_read": 1,
+        "created_at": "2026-03-12T07:40:21.000Z"
+      },
+      {
+        "notification_id": 4,
+        "user_id": 5,
+        "title": "Documents Ready for Release",
+        "message": "Your requested documents (TMC - CERTIFICATE OF GOOD MORAL CHARACTER, TMC - CERTIFICATION) are now ready for release.\n\nReceipt Reference: OR-1773482562417-6\nReceipt ID: 3\nIssued By: Registrar (STUDENT)\n\nPlease proceed to the Registrar’s Office to claim your documents.\n\nRefundable Amount: ₱150.00\nKindly coordinate with the Registrar for the refund process.",
+        "type": "request_update",
+        "status": "with_refund",
+        "is_read": 1,
+        "created_at": "2026-03-14T10:02:42.000Z"
+      }
+    ],
+    "password_resets": [],
+    "payment_batches": [
+      {
+        "batch_id": 1,
+        "student_id": 1,
+        "total_amount": "350.00",
+        "status": "paid",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "batch_id": 2,
+        "student_id": 3,
+        "total_amount": "150.00",
+        "status": "paid",
+        "created_at": "2026-03-10T13:47:19.000Z"
+      },
+      {
+        "batch_id": 3,
+        "student_id": 11,
+        "total_amount": "300.00",
+        "status": "pending",
+        "created_at": "2026-03-12T14:12:56.000Z"
+      },
+      {
+        "batch_id": 4,
+        "student_id": 11,
+        "total_amount": "150.00",
+        "status": "pending",
+        "created_at": "2026-03-12T15:11:30.000Z"
+      },
+      {
+        "batch_id": 5,
+        "student_id": 3,
+        "total_amount": "300.00",
+        "status": "paid",
+        "created_at": "2026-03-13T07:38:21.000Z"
+      },
+      {
+        "batch_id": 6,
+        "student_id": 3,
+        "total_amount": "300.00",
+        "status": "paid",
+        "created_at": "2026-03-13T07:49:00.000Z"
+      }
+    ],
+    "payment_logs": [
+      {
+        "log_id": 1,
+        "payment_id": 1,
+        "old_status": "submitted",
+        "new_status": "verified",
+        "changed_by": 2,
+        "note": "Batch payment verified",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "log_id": 2,
+        "payment_id": 2,
+        "old_status": null,
+        "new_status": "pending",
+        "changed_by": null,
+        "note": "Payment created (awaiting proof)",
+        "created_at": "2026-03-10T13:48:27.000Z"
+      },
+      {
+        "log_id": 3,
+        "payment_id": 2,
+        "old_status": "pending",
+        "new_status": "submitted",
+        "changed_by": null,
+        "note": "Payment proof uploaded",
+        "created_at": "2026-03-10T13:48:39.000Z"
+      },
+      {
+        "log_id": 4,
+        "payment_id": 2,
+        "old_status": "submitted",
+        "new_status": "verified",
+        "changed_by": 1,
+        "note": "Payment verified by admin",
+        "created_at": "2026-03-10T14:14:44.000Z"
+      },
+      {
+        "log_id": 5,
+        "payment_id": 3,
+        "old_status": null,
+        "new_status": "pending",
+        "changed_by": null,
+        "note": "Payment created (awaiting proof)",
+        "created_at": "2026-03-12T14:14:14.000Z"
+      },
+      {
+        "log_id": 6,
+        "payment_id": 3,
+        "old_status": "pending",
+        "new_status": "submitted",
+        "changed_by": null,
+        "note": "Payment proof uploaded",
+        "created_at": "2026-03-12T14:14:40.000Z"
+      },
+      {
+        "log_id": 7,
+        "payment_id": 4,
+        "old_status": null,
+        "new_status": "pending",
+        "changed_by": null,
+        "note": "Payment created (awaiting proof)",
+        "created_at": "2026-03-13T07:41:58.000Z"
+      },
+      {
+        "log_id": 8,
+        "payment_id": 4,
+        "old_status": "pending",
+        "new_status": "submitted",
+        "changed_by": null,
+        "note": "Payment proof uploaded",
+        "created_at": "2026-03-13T07:42:15.000Z"
+      },
+      {
+        "log_id": 9,
+        "payment_id": 5,
+        "old_status": null,
+        "new_status": "pending",
+        "changed_by": null,
+        "note": "Payment created (awaiting proof)",
+        "created_at": "2026-03-13T07:50:07.000Z"
+      },
+      {
+        "log_id": 10,
+        "payment_id": 5,
+        "old_status": "pending",
+        "new_status": "submitted",
+        "changed_by": null,
+        "note": "Payment proof uploaded",
+        "created_at": "2026-03-13T07:50:30.000Z"
+      },
+      {
+        "log_id": 11,
+        "payment_id": 5,
+        "old_status": "submitted",
+        "new_status": "verified",
+        "changed_by": 1,
+        "note": "Payment verified by admin",
+        "created_at": "2026-03-13T07:51:57.000Z"
+      },
+      {
+        "log_id": 12,
+        "payment_id": 4,
+        "old_status": "submitted",
+        "new_status": "verified",
+        "changed_by": 1,
+        "note": "Payment verified by admin",
+        "created_at": "2026-03-14T10:12:04.000Z"
+      }
+    ],
+    "payment_methods": [
+      {
+        "method_id": 1,
+        "method_name": "Gcash",
+        "send_to": "09515437552",
+        "sender_name": "Baby Angels",
+        "is_active": 1,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "method_id": 2,
+        "method_name": "Cash",
+        "send_to": "Onsite",
+        "sender_name": "Registrar Office",
+        "is_active": 1,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      }
+    ],
+    "payments": [
+      {
+        "payment_id": 1,
+        "batch_id": 1,
+        "request_id": null,
+        "student_id": 1,
+        "amount": "350.00",
+        "method_id": 1,
+        "payment_proof": "/uploads/payments/batch1.png",
+        "payment_status": "verified",
+        "verified_by": 2,
+        "verified_at": "2026-02-24T07:39:32.000Z",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "payment_id": 2,
+        "batch_id": 2,
+        "request_id": null,
+        "student_id": 3,
+        "amount": "150.00",
+        "method_id": 1,
+        "payment_proof": "/uploads/payments/payment_2_1773150519118.jpg",
+        "payment_status": "verified",
+        "verified_by": 1,
+        "verified_at": "2026-03-10T14:14:44.000Z",
+        "created_at": "2026-03-10T13:48:27.000Z"
+      },
+      {
+        "payment_id": 3,
+        "batch_id": 3,
+        "request_id": null,
+        "student_id": 11,
+        "amount": "300.00",
+        "method_id": 1,
+        "payment_proof": "/uploads/payments/payment_3_1773324880840.jpg",
+        "payment_status": "submitted",
+        "verified_by": null,
+        "verified_at": null,
+        "created_at": "2026-03-12T14:14:14.000Z"
+      },
+      {
+        "payment_id": 4,
+        "batch_id": 5,
+        "request_id": null,
+        "student_id": 3,
+        "amount": "300.00",
+        "method_id": 1,
+        "payment_proof": "/uploads/payments/payment_4_1773387735851.jpg",
+        "payment_status": "verified",
+        "verified_by": 1,
+        "verified_at": "2026-03-14T10:12:04.000Z",
+        "created_at": "2026-03-13T07:41:58.000Z"
+      },
+      {
+        "payment_id": 5,
+        "batch_id": 6,
+        "request_id": null,
+        "student_id": 3,
+        "amount": "300.00",
+        "method_id": 1,
+        "payment_proof": "/uploads/payments/payment_5_1773388230881.jpg",
+        "payment_status": "verified",
+        "verified_by": 1,
+        "verified_at": "2026-03-13T07:51:57.000Z",
+        "created_at": "2026-03-13T07:50:07.000Z"
+      }
+    ],
+    "provinces": [
+      {
+        "province_id": 1,
+        "province_name": "Bohol"
+      }
+    ],
+    "receipt_items": [
+      {
+        "receipt_item_id": 1,
+        "receipt_id": 1,
+        "request_id": 1,
+        "document_name": "Transcript of Records",
+        "quantity": 2,
+        "amount": "300.00",
+        "request_status": "completed",
+        "created_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "receipt_item_id": 2,
+        "receipt_id": 1,
+        "request_id": 2,
+        "document_name": "Certificate of Enrollment",
+        "quantity": 1,
+        "amount": "50.00",
+        "request_status": "rejected",
+        "created_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "receipt_item_id": 3,
+        "receipt_id": 2,
+        "request_id": 3,
+        "document_name": "TMC - CERTIFICATION",
+        "quantity": 1,
+        "amount": "150.00",
+        "request_status": "completed",
+        "created_at": "2026-03-12T07:40:21.000Z"
+      },
+      {
+        "receipt_item_id": 4,
+        "receipt_id": 3,
+        "request_id": 9,
+        "document_name": "TMC - CERTIFICATE OF GOOD MORAL CHARACTER",
+        "quantity": 1,
+        "amount": "150.00",
+        "request_status": "completed",
+        "created_at": "2026-03-14T10:02:42.000Z"
+      },
+      {
+        "receipt_item_id": 5,
+        "receipt_id": 3,
+        "request_id": 10,
+        "document_name": "TMC - CERTIFICATION",
+        "quantity": 1,
+        "amount": "150.00",
+        "request_status": "rejected",
+        "created_at": "2026-03-14T10:02:42.000Z"
+      }
+    ],
+    "receipts": [
+      {
+        "receipt_id": 1,
+        "receipt_reference": "REC-1-20250210-A1B2",
+        "batch_id": 1,
+        "student_id": 1,
+        "total_paid": "350.00",
+        "completed_amount": "300.00",
+        "rejected_amount": "50.00",
+        "refundable_amount": "50.00",
+        "currency": "PHP",
+        "issued_at": "2026-02-24T15:39:33.000Z",
+        "issued_by": 2,
+        "receipt_status": "issued",
+        "pdf_path": "/uploads/receipts/receipt-REC-1-20250210-A1B2.pdf",
+        "created_at": "2026-02-24T07:39:33.000Z"
+      },
+      {
+        "receipt_id": 2,
+        "receipt_reference": "OR-1773301221394-2",
+        "batch_id": 2,
+        "student_id": 3,
+        "total_paid": "150.00",
+        "completed_amount": "150.00",
+        "rejected_amount": "0.00",
+        "refundable_amount": "0.00",
+        "currency": "PHP",
+        "issued_at": "2026-03-12T07:40:21.000Z",
+        "issued_by": 1,
+        "receipt_status": "issued",
+        "pdf_path": "/uploads/receipts/receipt-OR-1773301221394-2.pdf",
+        "created_at": "2026-03-12T07:40:21.000Z"
+      },
+      {
+        "receipt_id": 3,
+        "receipt_reference": "OR-1773482562417-6",
+        "batch_id": 6,
+        "student_id": 3,
+        "total_paid": "300.00",
+        "completed_amount": "150.00",
+        "rejected_amount": "150.00",
+        "refundable_amount": "150.00",
+        "currency": "PHP",
+        "issued_at": "2026-03-14T10:02:42.000Z",
+        "issued_by": 5,
+        "receipt_status": "issued",
+        "pdf_path": "/uploads/receipts/receipt-OR-1773482562417-6.pdf",
+        "created_at": "2026-03-14T10:02:42.000Z"
+      }
+    ],
+    "refund_logs": [
+      {
+        "log_id": 1,
+        "refund_id": 1,
+        "old_status": "pending",
+        "new_status": "approved",
+        "changed_by": 1,
+        "note": "Refund approved",
+        "created_at": "2026-02-24T07:39:33.000Z"
+      }
+    ],
+    "refund_requests": [
+      {
+        "refund_id": 1,
+        "payment_id": 1,
+        "request_id": 2,
+        "student_id": 1,
+        "reason": "Request rejected after payment",
+        "refund_status": "approved",
+        "reviewed_by": 1,
+        "reviewed_at": "2026-02-24T07:39:33.000Z",
+        "released_at": null,
+        "created_at": "2026-02-24T07:39:33.000Z",
+        "updated_at": "2026-02-24T07:39:33.000Z"
+      }
+    ],
+    "request_status_logs": [
+      {
+        "status_log_id": 1,
+        "request_id": 1,
+        "status": "processing",
+        "message": "Processing started",
+        "created_by": 2,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 2,
+        "request_id": 2,
+        "status": "rejected",
+        "message": "Rejected due to missing records",
+        "created_by": 2,
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 3,
+        "request_id": 1,
+        "status": "completed",
+        "message": "Document released successfully",
+        "created_by": 2,
+        "created_at": "2026-02-24T07:39:33.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 4,
+        "request_id": 1,
+        "status": "completed",
+        "message": "eheggr",
+        "created_by": 1,
+        "created_at": "2026-02-24T08:06:19.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 5,
+        "request_id": 3,
+        "status": "pending",
+        "message": "hjjuhhnnn",
+        "created_by": 1,
+        "created_at": "2026-03-10T14:16:15.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 6,
+        "request_id": 3,
+        "status": "pending",
+        "message": "ghhybnnn",
+        "created_by": 1,
+        "created_at": "2026-03-10T14:16:49.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 7,
+        "request_id": 3,
+        "status": "processing",
+        "message": "ghhjjjj",
+        "created_by": 1,
+        "created_at": "2026-03-10T14:16:55.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 8,
+        "request_id": 3,
+        "status": "releasing",
+        "message": "hjknmnnm",
+        "created_by": 1,
+        "created_at": "2026-03-10T14:17:14.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 9,
+        "request_id": 3,
+        "status": "completed",
+        "message": "hbjjjj",
+        "created_by": 1,
+        "created_at": "2026-03-10T14:22:15.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 10,
+        "request_id": 9,
+        "status": "processing",
+        "message": "svfffghhjhhhgfsaas",
+        "created_by": 1,
+        "created_at": "2026-03-13T07:52:27.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 11,
+        "request_id": 9,
+        "status": "releasing",
+        "message": "gvvnc bbnxcx xndddd",
+        "created_by": 1,
+        "created_at": "2026-03-13T07:52:41.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 12,
+        "request_id": 9,
+        "status": "completed",
+        "message": "dfbcbv   xxcvcx",
+        "created_by": 1,
+        "created_at": "2026-03-13T07:52:50.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 13,
+        "request_id": 9,
+        "status": "completed",
+        "message": "fgffgh",
+        "created_by": 1,
+        "created_at": "2026-03-13T07:52:57.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 14,
+        "request_id": 9,
+        "status": "completed",
+        "message": "nakuha nna ni justmay",
+        "created_by": 1,
+        "created_at": "2026-03-13T07:53:18.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 15,
+        "request_id": 10,
+        "status": "rejected",
+        "message": "bghrffhh",
+        "created_by": 1,
+        "created_at": "2026-03-13T08:18:27.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 16,
+        "request_id": 7,
+        "status": "processing",
+        "message": "dvgs",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:05.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 17,
+        "request_id": 7,
+        "status": "releasing",
+        "message": "ffs",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:10.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 18,
+        "request_id": 7,
+        "status": "completed",
+        "message": "fsfd",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:18.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 19,
+        "request_id": 8,
+        "status": "processing",
+        "message": "fsss",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:28.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 20,
+        "request_id": 8,
+        "status": "releasing",
+        "message": "sfvs",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:32.000Z",
+        "updated_at": null
+      },
+      {
+        "status_log_id": 21,
+        "request_id": 8,
+        "status": "completed",
+        "message": "sfvv",
+        "created_by": 1,
+        "created_at": "2026-03-14T10:13:38.000Z",
+        "updated_at": null
+      }
+    ],
+    "roles": [
+      {
+        "role_id": 1,
+        "role_name": "admin",
+        "role_description": "Full system administrator with all privileges"
+      },
+      {
+        "role_id": 2,
+        "role_name": "student",
+        "role_description": "Registered student user with limited access"
+      },
+      {
+        "role_id": 3,
+        "role_name": "registrar",
+        "role_description": "Registrar staff who manages course registrations and records"
+      }
+    ],
+    "student_addresses": [
+      {
+        "address_id": 1,
+        "student_id": 1,
+        "address_type": "current",
+        "province_id": 1,
+        "municipality_id": 1,
+        "barangay_id": 1,
+        "street": "Rizal St.",
+        "postal_code": "6304",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "address_id": 2,
+        "student_id": 2,
+        "address_type": "current",
+        "province_id": 1,
+        "municipality_id": 1,
+        "barangay_id": 1,
+        "street": "Bonifacio St.",
+        "postal_code": "6304",
+        "created_at": "2026-02-24T07:39:32.000Z"
+      }
+    ],
+    "student_guardians": [
+      {
+        "guardian_id": 1,
+        "student_id": 1,
+        "guardian_type": "father",
+        "first_name": "Pedro",
+        "last_name": "Dela Cruz",
+        "contact_number": "09171111111",
+        "occupation": "Farmer",
+        "email": null,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "guardian_id": 2,
+        "student_id": 2,
+        "guardian_type": "mother",
+        "first_name": "Ana",
+        "last_name": "Santos",
+        "contact_number": "09172222222",
+        "occupation": "Teacher",
+        "email": null,
+        "created_at": "2026-02-24T07:39:32.000Z"
+      }
+    ],
+    "student_profiles": [
+      {
+        "student_id": 1,
+        "user_id": 3,
+        "student_number": "2024-0001",
+        "first_name": "Juan",
+        "middle_name": null,
+        "last_name": "Dela Cruz",
+        "extension_name": null,
+        "birthdate": null,
+        "gender": "male",
+        "contact_number": "09990000001",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "1st",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "student_id": 2,
+        "user_id": 4,
+        "student_number": "2024-0002",
+        "first_name": "Maria",
+        "middle_name": null,
+        "last_name": "Santos",
+        "extension_name": null,
+        "birthdate": null,
+        "gender": "female",
+        "contact_number": "09990000002",
+        "profile_picture": null,
+        "course_id": 2,
+        "year_level": "2nd",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "student_id": 3,
+        "user_id": 5,
+        "student_number": "09515437552",
+        "first_name": "Bernadeth",
+        "middle_name": "null",
+        "last_name": "Evardo",
+        "extension_name": "null",
+        "birthdate": "2003-11-14T16:00:00.000Z",
+        "gender": "female",
+        "contact_number": "09515437552",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "4th",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-02-24T07:59:31.000Z",
+        "updated_at": "2026-03-13T09:03:34.000Z"
+      },
+      {
+        "student_id": 4,
+        "user_id": 6,
+        "student_number": "22-013347",
+        "first_name": "Marjory",
+        "middle_name": "f",
+        "last_name": "Toredes",
+        "extension_name": "jr",
+        "birthdate": "2004-02-17T16:00:00.000Z",
+        "gender": "female",
+        "contact_number": "09945502070",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "4th",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-04T06:53:45.000Z",
+        "updated_at": "2026-03-12T16:36:54.000Z"
+      },
+      {
+        "student_id": 5,
+        "user_id": 7,
+        "student_number": "22-013346",
+        "first_name": "Christiel",
+        "middle_name": "",
+        "last_name": "Angels",
+        "extension_name": null,
+        "birthdate": "2002-06-05T16:00:00.000Z",
+        "gender": "male",
+        "contact_number": "09940508802",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "4th",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-12T04:07:29.000Z",
+        "updated_at": "2026-03-12T04:07:29.000Z"
+      },
+      {
+        "student_id": 6,
+        "user_id": 8,
+        "student_number": "18-006184",
+        "first_name": "Kristian",
+        "middle_name": "null",
+        "last_name": "Cosme",
+        "extension_name": "null",
+        "birthdate": "1998-12-06T16:00:00.000Z",
+        "gender": "female",
+        "contact_number": "09936485213",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "alumni 2018-2026",
+        "enrollment_status": "alumni",
+        "created_at": "2026-03-12T08:38:18.000Z",
+        "updated_at": "2026-03-12T16:28:22.000Z"
+      },
+      {
+        "student_id": 9,
+        "user_id": 11,
+        "student_number": "1234567",
+        "first_name": "John Paul",
+        "middle_name": null,
+        "last_name": "Curib",
+        "extension_name": null,
+        "birthdate": "2003-12-14T16:00:00.000Z",
+        "gender": "male",
+        "contact_number": "09702237379",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "alumni 2025-2026",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-12T09:39:29.000Z",
+        "updated_at": "2026-03-12T09:39:29.000Z"
+      },
+      {
+        "student_id": 10,
+        "user_id": 12,
+        "student_number": "12344567",
+        "first_name": "Angel",
+        "middle_name": null,
+        "last_name": "Cosme",
+        "extension_name": null,
+        "birthdate": "2026-03-11T16:00:00.000Z",
+        "gender": "male",
+        "contact_number": "09702237379",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "1st",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-12T09:43:23.000Z",
+        "updated_at": "2026-03-12T09:43:23.000Z"
+      },
+      {
+        "student_id": 11,
+        "user_id": 14,
+        "student_number": "22-014021",
+        "first_name": "Angels",
+        "middle_name": "null",
+        "last_name": "Baby",
+        "extension_name": "Jr.",
+        "birthdate": "2026-03-11T16:00:00.000Z",
+        "gender": "female",
+        "contact_number": "09515437552",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "alumni 2022-2026",
+        "enrollment_status": "alumni",
+        "created_at": "2026-03-12T14:08:27.000Z",
+        "updated_at": "2026-03-12T16:36:07.000Z"
+      },
+      {
+        "student_id": 12,
+        "user_id": 15,
+        "student_number": "10109191",
+        "first_name": "Angel",
+        "middle_name": null,
+        "last_name": "Kita",
+        "extension_name": null,
+        "birthdate": "2003-12-13T16:00:00.000Z",
+        "gender": "male",
+        "contact_number": "09702237379",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "alumni 2004-2005",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-14T09:12:30.000Z",
+        "updated_at": "2026-03-14T09:12:30.000Z"
+      },
+      {
+        "student_id": 13,
+        "user_id": 16,
+        "student_number": "22-345672",
+        "first_name": "Bernadeth",
+        "middle_name": null,
+        "last_name": "Abanco",
+        "extension_name": null,
+        "birthdate": "2003-12-15T16:00:00.000Z",
+        "gender": "female",
+        "contact_number": "09367614035",
+        "profile_picture": null,
+        "course_id": 1,
+        "year_level": "alumni 2022-2026",
+        "enrollment_status": "enrolled",
+        "created_at": "2026-03-14T09:33:35.000Z",
+        "updated_at": "2026-03-14T09:33:35.000Z"
+      }
+    ],
+    "system_settings": [
+      {
+        "id": 1,
+        "school_name": "Trinidad Municipal College",
+        "school_short_name": "TMC",
+        "school_email": "eregistrar@gmail.com",
+        "school_contact_number": "+63 917 123 4567",
+        "school_address": "Poblacion, Trinidad, Bohol",
+        "school_website": "https://tmc.eregistrar.ph",
+        "school_logo": "/uploads/system/school_logo.png",
+        "school_seal": "/uploads/system/school_seal.png",
+        "school_icon": "/uploads/system/school_icon.png",
+        "updated_by": 1,
+        "updated_at": "2026-03-12T15:30:41.000Z"
+      }
+    ],
+    "user_roles": [
+      {
+        "user_role_id": 1,
+        "user_id": 1,
+        "role_id": 1,
+        "assigned_by": null,
+        "assigned_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "user_role_id": 3,
+        "user_id": 3,
+        "role_id": 2,
+        "assigned_by": 1,
+        "assigned_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "user_role_id": 4,
+        "user_id": 4,
+        "role_id": 2,
+        "assigned_by": 1,
+        "assigned_at": "2026-02-24T07:39:32.000Z"
+      },
+      {
+        "user_role_id": 5,
+        "user_id": 5,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-02-24T07:59:31.000Z"
+      },
+      {
+        "user_role_id": 6,
+        "user_id": 6,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-04T06:53:45.000Z"
+      },
+      {
+        "user_role_id": 8,
+        "user_id": 2,
+        "role_id": 3,
+        "assigned_by": null,
+        "assigned_at": "2026-03-10T13:25:44.000Z"
+      },
+      {
+        "user_role_id": 9,
+        "user_id": 7,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-12T04:07:29.000Z"
+      },
+      {
+        "user_role_id": 10,
+        "user_id": 8,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-12T08:38:18.000Z"
+      },
+      {
+        "user_role_id": 13,
+        "user_id": 11,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-12T09:39:29.000Z"
+      },
+      {
+        "user_role_id": 14,
+        "user_id": 12,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-12T09:43:23.000Z"
+      },
+      {
+        "user_role_id": 16,
+        "user_id": 14,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-12T14:08:27.000Z"
+      },
+      {
+        "user_role_id": 21,
+        "user_id": 13,
+        "role_id": 1,
+        "assigned_by": null,
+        "assigned_at": "2026-03-13T07:57:57.000Z"
+      },
+      {
+        "user_role_id": 22,
+        "user_id": 15,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-14T09:12:30.000Z"
+      },
+      {
+        "user_role_id": 23,
+        "user_id": 16,
+        "role_id": 2,
+        "assigned_by": null,
+        "assigned_at": "2026-03-14T09:33:35.000Z"
+      }
+    ],
+    "users": [
+      {
+        "user_id": 1,
+        "email": "admineregistrar@gmail.com",
+        "password": "$2y$10$pDD3f4c64ddxBgTJbzvcF.f.CW2NEJe490FLQdot.sJ8aPnjg4RD.",
+        "account_type": "admin",
+        "status": "active",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": null
+      },
+      {
+        "user_id": 2,
+        "email": "registrar@tmc.edu.ph",
+        "password": "$2y$10$PrMBMOXxDqEERDV5d7DPROvIo3QXDDtMcNEA0wZYMwEXW1GzhjzSa",
+        "account_type": "",
+        "status": "active",
+        "created_at": "2026-02-24T07:39:32.000Z",
+        "updated_at": "2026-03-10T13:25:59.000Z"
+      },
+      {
+        "user_id": 5,
+        "email": "evardobernadeth153@gmail.com",
+        "password": "$2y$10$b5muGVzEFQjZlfUFX4wj6udKgKAn6W3OlD3Zy6aT0JwcSD.jCSmUq",
+        "account_type": "student",
+        "status": "active",
+        "created_at": "2026-02-24T07:59:31.000Z",
+        "updated_at": "2026-03-13T09:03:34.000Z"
+      },
+      {
+        "user_id": 13,
+        "email": "registrar@gmail.com",
+        "password": "$2b$10$GQ7nvm/cyl87cvzbjimkjeBUD.EUwHe2JbrfvxW3dprFxugtMLAAu",
+        "account_type": "registrar",
+        "status": "active",
+        "created_at": "2026-03-12T13:14:27.000Z",
+        "updated_at": "2026-03-12T15:57:08.000Z"
+      },
+      {
+        "user_id": 15,
+        "email": "kitaangels09876@gmail.com",
+        "password": "$2b$10$FP98yVEtGbYzjD52d.Sul.yFeI59NXWa0UOlN2xaBM3sMgN7oCkQq",
+        "account_type": "student",
+        "status": "active",
+        "created_at": "2026-03-14T09:12:30.000Z",
+        "updated_at": "2026-03-14T09:13:36.000Z"
+      },
+      {
+        "user_id": 16,
+        "email": "evardobernadeth@gmail.com",
+        "password": "$2b$10$qkpf6PDQqzR5Yyqz9/eLNOu/YbweQe8lSgYS3P8rALHawk89zSXJC",
+        "account_type": "student",
+        "status": "active",
+        "created_at": "2026-03-14T09:33:35.000Z",
+        "updated_at": "2026-03-14T09:38:50.000Z"
+      }
+    ]
+  }
+}

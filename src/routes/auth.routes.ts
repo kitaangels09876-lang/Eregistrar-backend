@@ -20,7 +20,7 @@ const router = Router();
 router.post(
   "/register-staff",
   authenticateToken,
-  requireRole("admin", "registrar"),
+  requireRole("admin"),
   validateAdminRegister,
   registerStaff
 );

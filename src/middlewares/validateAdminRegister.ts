@@ -8,6 +8,7 @@ export const validateAdminRegister = (
   let {
     email,
     password,
+    role,
     first_name,
     middle_name,
     last_name,
@@ -18,6 +19,7 @@ export const validateAdminRegister = (
 
   if (email !== undefined) email = String(email);
   if (password !== undefined) password = String(password);
+  if (role !== undefined) role = String(role);
   if (first_name !== undefined) first_name = String(first_name);
   if (middle_name !== undefined) middle_name = String(middle_name);
   if (last_name !== undefined) last_name = String(last_name);
@@ -47,6 +49,15 @@ export const validateAdminRegister = (
       errors.push({ field: "password", message: "Must contain number" });
     if (!/[^A-Za-z0-9]/.test(password))
       errors.push({ field: "password", message: "Must contain special character" });
+  }
+
+  if (!role?.trim()) {
+    errors.push({ field: "role", message: "Role is required" });
+  } else if (!["admin", "registrar"].includes(role.trim().toLowerCase())) {
+    errors.push({
+      field: "role",
+      message: "Role must be admin or registrar",
+    });
   }
 
 
@@ -100,6 +111,7 @@ export const validateAdminRegister = (
   }
 
   req.body.email = email.trim();
+  req.body.role = role.trim().toLowerCase();
   req.body.first_name = first_name.trim();
   req.body.middle_name = middle_name?.trim() || null;
   req.body.last_name = last_name.trim();

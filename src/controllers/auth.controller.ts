@@ -9,7 +9,13 @@
   import bcrypt from "bcryptjs";
   import { generateToken } from '../config/jwt.config';
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
-import { sendEmailVerificationEmail, verifyEmailVerificationToken } from "../services/emailVerification.service";
+import { resolveEffectiveAccountType } from "../utils/resolveAccountType";
+import {
+  buildEmailVerificationUrl,
+  generateEmailVerificationToken,
+  sendEmailVerificationEmail,
+  verifyEmailVerificationToken,
+} from "../services/emailVerification.service";
 import {
   sendSingleFieldValidationError,
   sendValidationError,
@@ -27,8 +33,29 @@ import {
     });
   };
 
+const isProductionEnvironment = (): boolean =>
+  process.env.NODE_ENV === "production";
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown error";
+};
+
+const getVerificationUrlForUser = (userId: number, email: string): string =>
+  buildEmailVerificationUrl(
+    generateEmailVerificationToken({
+      user_id: userId,
+      email,
+    })
+  );
+
 
 export const registerStaff = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+
   try {
     const {
       email,
@@ -43,6 +70,7 @@ export const registerStaff = async (req: Request, res: Response) => {
     const creatorUserId = getUserIdFromRequest(req);
 
     if (!creatorUserId) {
+      await transaction.rollback();
       return res.status(401).json({
         status: "error",
         message: "Unauthorized",
@@ -50,14 +78,16 @@ export const registerStaff = async (req: Request, res: Response) => {
     }
 
     if (!["admin", "registrar"].includes(role)) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Invalid role. Allowed roles: admin, registrar",
       });
     }
 
-    const existing = await User.findOne({ where: { email } });
+    const existing = await User.findOne({ where: { email }, transaction });
     if (existing) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Email already exists",
@@ -69,8 +99,8 @@ export const registerStaff = async (req: Request, res: Response) => {
     const user = await User.create({
       email,
       password: hashedPassword,
-      account_type: "admin", 
-    });
+      account_type: role,
+    }, { transaction });
 
     await Admin.create({
       user_id: user.user_id,
@@ -78,10 +108,14 @@ export const registerStaff = async (req: Request, res: Response) => {
       middle_name,
       last_name,
       contact_number,
-    });
+    }, { transaction });
 
-    const roleRecord = await Role.findOne({ where: { role_name: role } });
+    const roleRecord = await Role.findOne({
+      where: { role_name: role },
+      transaction,
+    });
     if (!roleRecord) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Role not found",
@@ -94,8 +128,11 @@ export const registerStaff = async (req: Request, res: Response) => {
       {
         replacements: [user.user_id, roleRecord.role_id, creatorUserId],
         type: QueryTypes.INSERT,
+        transaction,
       }
     );
+
+    await transaction.commit();
 
     await logActivity({
       userId: creatorUserId,
@@ -116,10 +153,14 @@ export const registerStaff = async (req: Request, res: Response) => {
       user: {
         user_id: user.user_id,
         email: user.email,
-        role,
+        account_type: role,
+        roles: [role],
       },
     });
   } catch (error) {
+    if (!(transaction as any).finished) {
+      await transaction.rollback();
+    }
     console.error("REGISTER STAFF ERROR:", error);
     return res.status(500).json({
       status: "error",
@@ -222,13 +263,49 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
     }
 
-    await sendEmailVerificationEmail({
-      userId: user.user_id,
-      email: user.email,
-      firstName: student.first_name,
-    });
+    const verificationUrl = getVerificationUrlForUser(user.user_id, user.email);
 
     await transaction.commit();
+
+    try {
+      await sendEmailVerificationEmail({
+        userId: user.user_id,
+        email: user.email,
+        firstName: student.first_name,
+      });
+    } catch (mailError) {
+      const emailErrorMessage = getErrorMessage(mailError);
+
+      console.error(
+        "REGISTER STUDENT EMAIL DELIVERY ERROR:",
+        emailErrorMessage
+      );
+
+      return res.status(201).json({
+        status: "success",
+        message:
+          "Student account created, but the verification email could not be sent. Retry the resend verification flow after SMTP/DNS is available.",
+        warning: "Verification email delivery failed.",
+        user: {
+          user_id: user.user_id,
+          email: user.email,
+          account_type: "student",
+          status: user.status,
+        },
+        student: {
+          student_id: student.student_id,
+          student_number: student.student_number,
+          first_name: student.first_name,
+          last_name: student.last_name,
+        },
+        ...(isProductionEnvironment()
+          ? {}
+          : {
+              verification_url: verificationUrl,
+              email_error: emailErrorMessage,
+            }),
+      });
+    }
 
     return res.status(201).json({
       status: "success",
@@ -378,9 +455,13 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
 
       const roles = userRoles.map((r: any) => r.role_name);
+      const effectiveAccountType = resolveEffectiveAccountType(
+        user.account_type,
+        roles
+      );
       let profile = null;
 
-      if (user.account_type === "student") {
+      if (effectiveAccountType === "student") {
         profile = await sequelize.query(
           `SELECT s.*, c.course_code, c.course_name 
           FROM student_profiles s
@@ -391,7 +472,7 @@ export const registerStudent = async (req: Request, res: Response) => {
             type: QueryTypes.SELECT,
           }
         );
-      } else if (user.account_type === "admin") {
+      } else if (["admin", "registrar"].includes(effectiveAccountType)) {
         profile = await sequelize.query(
           `SELECT a.* 
           FROM admin_profiles a 
@@ -408,7 +489,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       const token = generateToken({
         user_id: user.user_id,
         email: user.email,
-        account_type: user.account_type,
+        account_type: effectiveAccountType,
         roles,
       });
 
@@ -420,7 +501,7 @@ export const registerStudent = async (req: Request, res: Response) => {
         user: {
           user_id: user.user_id,
           email: user.email,
-          account_type: user.account_type,
+          account_type: effectiveAccountType,
           roles,
           status: user.status,
           created_at: user.created_at,
@@ -516,10 +597,14 @@ export const registerStudent = async (req: Request, res: Response) => {
     );
 
     const roles = rolesResult.map((r: any) => r.role_name);
+    const effectiveAccountType = resolveEffectiveAccountType(
+      user.account_type,
+      roles
+    );
 
     let profile: any = null;
 
-    if (user.account_type === "student") {
+    if (effectiveAccountType === "student") {
       const students: any[] = await sequelize.query(
         `
         SELECT 
@@ -587,7 +672,7 @@ export const registerStudent = async (req: Request, res: Response) => {
         };
       }
 
-    } else if (user.account_type === "admin") {
+    } else if (["admin", "registrar"].includes(effectiveAccountType)) {
       const admins: any[] = await sequelize.query(
         `
         SELECT *
@@ -606,7 +691,11 @@ export const registerStudent = async (req: Request, res: Response) => {
     return res.status(200).json({
       status: "success",
       authenticated: true,
-      user,
+      user: {
+        ...user,
+        account_type: effectiveAccountType,
+        roles,
+      },
       roles,
       profile,
     });
@@ -807,11 +896,38 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
       attributes: ["first_name"],
     });
 
-    await sendEmailVerificationEmail({
-      userId: user.user_id,
-      email: user.email,
-      firstName: student?.first_name,
-    });
+    const verificationUrl = getVerificationUrlForUser(user.user_id, user.email);
+
+    try {
+      await sendEmailVerificationEmail({
+        userId: user.user_id,
+        email: user.email,
+        firstName: student?.first_name,
+      });
+    } catch (mailError) {
+      const emailErrorMessage = getErrorMessage(mailError);
+
+      console.error(
+        "RESEND VERIFICATION EMAIL DELIVERY ERROR:",
+        emailErrorMessage
+      );
+
+      if (!isProductionEnvironment()) {
+        return res.status(200).json({
+          status: "success",
+          message:
+            "Verification email could not be sent. Use the verification URL below in development or retry once SMTP/DNS is available.",
+          warning: "Verification email delivery failed.",
+          verification_url: verificationUrl,
+          email_error: emailErrorMessage,
+        });
+      }
+
+      return res.status(503).json({
+        status: "error",
+        message: "Failed to send verification email",
+      });
+    }
 
     return res.status(200).json({
       status: "success",

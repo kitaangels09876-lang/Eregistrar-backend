@@ -277,6 +277,20 @@ export const changeAdminOrRegistrarRole = async (
       }
     );
 
+    await sequelize.query(
+      `
+      UPDATE users
+      SET account_type = :role,
+          updated_at = NOW()
+      WHERE user_id = :userId
+      `,
+      {
+        replacements: { userId, role },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
     await transaction.commit();
 
     return res.status(200).json({

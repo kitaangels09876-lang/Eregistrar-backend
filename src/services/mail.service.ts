@@ -79,11 +79,26 @@ export const sendEmail = async ({
 }: MailPayload): Promise<void> => {
   const config = getMailConfig();
 
-  await getTransporter().sendMail({
-    from: config.from,
-    to,
-    subject,
-    text,
-    html,
-  });
+  try {
+    await getTransporter().sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+  } catch (error) {
+    const errorCode =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: string }).code)
+        : "";
+
+    if (errorCode === "ENOTFOUND" || errorCode === "EDNS") {
+      throw new Error(
+        `SMTP host lookup failed for ${config.host}. Check DNS, internet access, or firewall settings.`
+      );
+    }
+
+    throw error;
+  }
 };

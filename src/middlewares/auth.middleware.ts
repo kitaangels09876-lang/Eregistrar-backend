@@ -24,6 +24,26 @@ declare global {
 }
 
 
+const normalizeAuthScope = (value: unknown) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const getAuthorizationScopes = (user?: JwtPayload) => {
+  const roleScopes = Array.isArray(user?.roles)
+    ? user.roles
+        .map((role) => normalizeAuthScope(role))
+        .filter(Boolean)
+    : [];
+
+  // Fallback for accounts whose JWT has no explicit role entries.
+  if (roleScopes.length > 0) {
+    return roleScopes;
+  }
+
+  const accountTypeScope = normalizeAuthScope(user?.account_type);
+  return accountTypeScope ? [accountTypeScope] : [];
+};
+
+
 export const authenticateToken = (
   req: Request,
   res: Response,
@@ -73,8 +93,13 @@ export const requireRole = (...allowedRoles: string[]) => {
       });
     }
 
-    const hasRole = req.user.roles.some(role =>
-      allowedRoles.includes(role)
+    const allowedScopes = allowedRoles
+      .map((role) => normalizeAuthScope(role))
+      .filter(Boolean);
+    const userScopes = getAuthorizationScopes(req.user);
+
+    const hasRole = userScopes.some((scope) =>
+      allowedScopes.includes(scope)
     );
 
     if (!hasRole) {
@@ -82,7 +107,7 @@ export const requireRole = (...allowedRoles: string[]) => {
         status: "error",
         message: "Insufficient permissions",
         required_roles: allowedRoles,
-        user_roles: req.user.roles,
+        user_roles: userScopes,
       });
     }
 

@@ -9,7 +9,7 @@
         user_id INT AUTO_INCREMENT PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        account_type ENUM('student','admin') NOT NULL,
+        account_type ENUM('student','admin','registrar') NOT NULL,
         status ENUM('active','inactive') DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NULL

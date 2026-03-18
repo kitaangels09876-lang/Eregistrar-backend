@@ -19,7 +19,7 @@ INSERT INTO users (email, password, account_type, status) VALUES
 
 ('registrar@tmc.edu.ph',
  '$2y$10$LoFkpMnAeySAYxhiwdV49uZHPLCyZpdFAd4wQneQyxdUehKT5pP0S',
- 'admin', 'active'),
+ 'registrar', 'active'),
 
 ('student1@tmc.edu.ph',
  '$2y$10$LoFkpMnAeySAYxhiwdV49uZHPLCyZpdFAd4wQneQyxdUehKT5pP0S',

@@ -69,13 +69,13 @@ export const getActivityLogs = async (req: Request, res: Response) => {
         u.account_type,
         CASE 
           WHEN u.account_type = 'student' THEN CONCAT(sp.first_name, ' ', sp.last_name)
-          WHEN u.account_type = 'admin' THEN CONCAT(ap.first_name, ' ', ap.last_name)
+          WHEN u.account_type IN ('admin', 'registrar') THEN CONCAT(ap.first_name, ' ', ap.last_name)
           ELSE 'Unknown User'
         END as user_name
        FROM audit_logs al
        LEFT JOIN users u ON al.user_id = u.user_id
        LEFT JOIN student_profiles sp ON u.user_id = sp.user_id AND u.account_type = 'student'
-       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type = 'admin'
+       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type IN ('admin', 'registrar')
        ${whereClause}
        ORDER BY al.timestamp DESC
        LIMIT :limit OFFSET :offset`,
@@ -138,13 +138,13 @@ export const getActivityLogById = async (req: Request, res: Response) => {
         u.account_type,
         CASE 
           WHEN u.account_type = 'student' THEN CONCAT(sp.first_name, ' ', sp.last_name)
-          WHEN u.account_type = 'admin' THEN CONCAT(ap.first_name, ' ', ap.last_name)
+          WHEN u.account_type IN ('admin', 'registrar') THEN CONCAT(ap.first_name, ' ', ap.last_name)
           ELSE 'Unknown User'
         END as user_name
        FROM audit_logs al
        LEFT JOIN users u ON al.user_id = u.user_id
        LEFT JOIN student_profiles sp ON u.user_id = sp.user_id AND u.account_type = 'student'
-       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type = 'admin'
+       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type IN ('admin', 'registrar')
        WHERE al.log_id = :logId`,
       {
         replacements: { logId: Number(logId) },
@@ -276,13 +276,13 @@ export const getActivityLogsByTable = async (req: Request, res: Response) => {
         u.email,
         CASE 
           WHEN u.account_type = 'student' THEN CONCAT(sp.first_name, ' ', sp.last_name)
-          WHEN u.account_type = 'admin' THEN CONCAT(ap.first_name, ' ', ap.last_name)
+          WHEN u.account_type IN ('admin', 'registrar') THEN CONCAT(ap.first_name, ' ', ap.last_name)
           ELSE 'Unknown User'
         END as user_name
        FROM audit_logs al
        LEFT JOIN users u ON al.user_id = u.user_id
        LEFT JOIN student_profiles sp ON u.user_id = sp.user_id AND u.account_type = 'student'
-       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type = 'admin'
+       LEFT JOIN admin_profiles ap ON u.user_id = ap.user_id AND u.account_type IN ('admin', 'registrar')
        ${whereClause}
        ORDER BY al.timestamp DESC
        LIMIT :limit OFFSET :offset`,
