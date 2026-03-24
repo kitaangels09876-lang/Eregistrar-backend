@@ -32,7 +32,7 @@ export const getAllPaymentMethods = async (req: Request, res: Response) => {
 
 export const getPaymentMethodById = async (req: Request, res: Response) => {
   try {
-    const { methodId } = req.params;
+    const methodId = Number(req.params.methodId);
 
     const method = await PaymentMethod.findOne({
       where: { method_id: methodId },
@@ -97,7 +97,7 @@ export const createPaymentMethod = async (req: Request, res: Response) => {
 
 export const updatePaymentMethod = async (req: Request, res: Response) => {
   try {
-    const { methodId } = req.params;
+    const methodId = Number(req.params.methodId);
     const { method_name, send_to, sender_name, is_active } = req.body;
 
     const method = await PaymentMethod.findByPk(methodId);

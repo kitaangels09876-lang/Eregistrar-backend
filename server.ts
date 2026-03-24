@@ -1,5 +1,4 @@
 import express from "express";
-import cookieParser from "cookie-parser";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
@@ -22,6 +21,7 @@ import systemSettingsRoutes from "./src/routes/systemSettings.routes";
 import documentRequestRoutes from "./src/routes/document-request.routes";
 import courseRoutes from "./src/routes/course.routes";
 import noticationRoutes from "./src/routes/notification.routes";
+import workflowRequestRoutes from "./src/routes/workflow/requestWorkflow.routes";
 
 dotenv.config();
 
@@ -31,14 +31,11 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(cookieParser());
-
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     exposedHeaders: ["Authorization"],
   })
 );
@@ -81,6 +78,7 @@ app.use("/api", adminRoutes);
 app.use("/api", roleRoutes);
 app.use("/api", systemSettingsRoutes);
 app.use("/api", courseRoutes);
+app.use("/api", workflowRequestRoutes);
 
 
 app.use(errorHandler);

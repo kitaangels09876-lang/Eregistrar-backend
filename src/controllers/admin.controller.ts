@@ -6,6 +6,15 @@ export const getAllAdminAndRegistrarAccounts = async (
   req: Request,
   res: Response
 ) => {
+  const staffRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
+
   try {
     const search = (req.query.search as string) || "";
     const page = Number(req.query.page) || 1;
@@ -19,7 +28,7 @@ export const getAllAdminAndRegistrarAccounts = async (
       INNER JOIN admin_profiles ap ON ap.user_id = u.user_id
       INNER JOIN user_roles ur ON ur.user_id = u.user_id
       INNER JOIN roles r ON r.role_id = ur.role_id
-      WHERE r.role_name IN ('admin', 'registrar')
+      WHERE r.role_name IN (:staffRoles)
         AND (
           :search = '' OR
           u.email LIKE :likeSearch OR
@@ -32,6 +41,7 @@ export const getAllAdminAndRegistrarAccounts = async (
         replacements: {
           search,
           likeSearch: `%${search}%`,
+          staffRoles,
         },
         type: QueryTypes.SELECT,
       }
@@ -65,7 +75,7 @@ export const getAllAdminAndRegistrarAccounts = async (
       INNER JOIN roles r 
         ON r.role_id = ur.role_id
 
-      WHERE r.role_name IN ('admin', 'registrar')
+      WHERE r.role_name IN (:staffRoles)
         AND (
           :search = '' OR
           u.email LIKE :likeSearch OR
@@ -82,6 +92,7 @@ export const getAllAdminAndRegistrarAccounts = async (
         replacements: {
           search,
           likeSearch: `%${search}%`,
+          staffRoles,
           limit,
           offset,
         },
@@ -112,6 +123,15 @@ export const getAdminOrRegistrarById = async (
   req: Request,
   res: Response
 ) => {
+  const staffRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
+
   try {
     const { userId } = req.params;
 
@@ -151,13 +171,13 @@ export const getAdminOrRegistrarById = async (
         ON r.role_id = ur.role_id
 
       WHERE u.user_id = :userId
-        AND r.role_name IN ('admin', 'registrar')
+        AND r.role_name IN (:staffRoles)
 
       GROUP BY u.user_id, ap.admin_id
       LIMIT 1
       `,
       {
-        replacements: { userId },
+        replacements: { userId, staffRoles },
         type: QueryTypes.SELECT
       }
     );
@@ -187,6 +207,14 @@ export const changeAdminOrRegistrarRole = async (
   res: Response
 ) => {
   const transaction = await sequelize.transaction();
+  const allowedRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
 
   try {
     const { userId } = req.params;
@@ -200,11 +228,11 @@ export const changeAdminOrRegistrarRole = async (
       });
     }
 
-    if (!["admin", "registrar"].includes(role)) {
+    if (!allowedRoles.includes(role)) {
       await transaction.rollback();
       return res.status(400).json({
         status: "error",
-        message: "Invalid role. Allowed values: admin, registrar"
+        message: `Invalid role. Allowed values: ${allowedRoles.join(", ")}`
       });
     }
 
@@ -256,10 +284,10 @@ export const changeAdminOrRegistrarRole = async (
       DELETE ur FROM user_roles ur
       INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE ur.user_id = :userId
-        AND r.role_name IN ('admin', 'registrar')
+        AND r.role_name IN (:allowedRoles)
       `,
       {
-        replacements: { userId },
+        replacements: { userId, allowedRoles },
         type: QueryTypes.DELETE,
         transaction
       }
@@ -280,12 +308,15 @@ export const changeAdminOrRegistrarRole = async (
     await sequelize.query(
       `
       UPDATE users
-      SET account_type = :role,
+      SET account_type = :accountType,
           updated_at = NOW()
       WHERE user_id = :userId
       `,
       {
-        replacements: { userId, role },
+        replacements: {
+          userId,
+          accountType: role === "registrar" ? "registrar" : "admin",
+        },
         type: QueryTypes.UPDATE,
         transaction,
       }
@@ -313,6 +344,14 @@ export const changeAdminOrRegistrarStatus = async (
   res: Response
 ) => {
   const transaction = await sequelize.transaction();
+  const staffRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
 
   try {
     const { userId } = req.params;
@@ -342,11 +381,11 @@ export const changeAdminOrRegistrarStatus = async (
       INNER JOIN user_roles ur ON ur.user_id = u.user_id
       INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE u.user_id = :userId
-        AND r.role_name IN ('admin', 'registrar')
+        AND r.role_name IN (:staffRoles)
       LIMIT 1
       `,
       {
-        replacements: { userId },
+        replacements: { userId, staffRoles },
         type: QueryTypes.SELECT,
         transaction,
       }

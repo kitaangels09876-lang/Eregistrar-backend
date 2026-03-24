@@ -10,6 +10,7 @@ export interface JwtPayload {
   email: string;
   account_type: string;
   roles: string[];
+  permissions?: string[];
   iat?: number;
   exp?: number;
 }
@@ -50,12 +51,17 @@ export const authenticateToken = (
   next: NextFunction
 ) => {
   try {
-    const token = req.cookies?.token;
+    const authorizationHeader = req.headers.authorization;
+    const token =
+      typeof authorizationHeader === "string" &&
+      authorizationHeader.startsWith("Bearer ")
+        ? authorizationHeader.slice("Bearer ".length).trim()
+        : "";
 
     if (!token) {
       return res.status(401).json({
         status: "error",
-        message: "Authentication required",
+        message: "Authorization token required",
       });
     }
 
@@ -131,6 +137,35 @@ export const requireAccountType = (...allowedTypes: string[]) => {
         message: "Invalid account type",
         required_types: allowedTypes,
         user_type: req.user.account_type,
+      });
+    }
+
+    next();
+  };
+};
+
+export const requirePermission = (...requiredPermissions: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required",
+      });
+    }
+
+    const permissions = Array.isArray(req.user.permissions)
+      ? req.user.permissions
+      : [];
+
+    const missingPermissions = requiredPermissions.filter(
+      (permission) => !permissions.includes(permission)
+    );
+
+    if (missingPermissions.length > 0) {
+      return res.status(403).json({
+        status: "error",
+        message: "Missing required permissions",
+        missing_permissions: missingPermissions,
       });
     }
 

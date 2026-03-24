@@ -14,6 +14,22 @@ export const resolveEffectiveAccountType = (
     return "registrar";
   }
 
+  if (normalizedRoles.includes("dean")) {
+    return "dean";
+  }
+
+  if (normalizedRoles.includes("college_admin")) {
+    return "college_admin";
+  }
+
+  if (normalizedRoles.includes("accounting")) {
+    return "accounting";
+  }
+
+  if (normalizedRoles.includes("treasurer")) {
+    return "treasurer";
+  }
+
   if (normalizedRoles.includes("admin")) {
     return normalizedAccountType === "student" ? "student" : "admin";
   }

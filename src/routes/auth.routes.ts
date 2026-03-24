@@ -4,6 +4,7 @@ import {
   login,
   logout,
   checkAuth,
+  refreshAccessToken,
   registerStudent,
   verifyEmail,
   resendVerificationEmail
@@ -30,6 +31,8 @@ router.post(
   validateLogin,
   login
 );
+
+router.post("/refresh", refreshAccessToken);
 
 
 router.get(

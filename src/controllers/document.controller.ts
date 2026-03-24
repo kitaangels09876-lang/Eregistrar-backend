@@ -126,7 +126,7 @@ export const createDocument = async (req: Request, res: Response) => {
 
 export const updateDocument = async (req: Request, res: Response) => {
   try {
-    const { documentTypeId } = req.params;
+    const documentTypeId = Number(req.params.documentTypeId);
     const {
       document_name,
       description,

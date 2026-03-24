@@ -7,9 +7,10 @@
     ValidationError as SequelizeValidationError,
   } from "sequelize"; 
   import bcrypt from "bcryptjs";
-  import { generateToken } from '../config/jwt.config';
+import { generateToken } from '../config/jwt.config';
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 import { resolveEffectiveAccountType } from "../utils/resolveAccountType";
+import { getPermissionsForRoles } from "../services/auth/permission.service";
 import {
   buildEmailVerificationUrl,
   generateEmailVerificationToken,
@@ -20,18 +21,12 @@ import {
   sendSingleFieldValidationError,
   sendValidationError,
 } from "../utils/validationResponse";
-
-
-  const setTokenCookie = (res: Response, token: string) => {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    res.cookie('token', token, {
-      httpOnly: true,       
-      secure: isProduction, 
-      sameSite: 'strict',   
-      maxAge: 60 * 60 * 1000 
-    });
-  };
+import {
+  findRefreshToken,
+  issueRefreshToken,
+  revokeRefreshToken,
+  revokeRefreshTokenById,
+} from "../services/auth/refreshToken.service";
 
 const isProductionEnvironment = (): boolean =>
   process.env.NODE_ENV === "production";
@@ -52,9 +47,25 @@ const getVerificationUrlForUser = (userId: number, email: string): string =>
     })
   );
 
+const buildAuthScopes = (roles: string[], profile: any) => ({
+  roles,
+  academic: {
+    course_id: profile?.course_id ?? null,
+    course_name: profile?.course_name ?? null,
+  },
+});
+
 
 export const registerStaff = async (req: Request, res: Response) => {
   const transaction = await sequelize.transaction();
+  const allowedRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
 
   try {
     const {
@@ -77,11 +88,11 @@ export const registerStaff = async (req: Request, res: Response) => {
       });
     }
 
-    if (!["admin", "registrar"].includes(role)) {
+    if (!allowedRoles.includes(role)) {
       await transaction.rollback();
       return res.status(400).json({
         status: "error",
-        message: "Invalid role. Allowed roles: admin, registrar",
+        message: `Invalid role. Allowed roles: ${allowedRoles.join(", ")}`,
       });
     }
 
@@ -95,11 +106,12 @@ export const registerStaff = async (req: Request, res: Response) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const accountType = role === "registrar" ? "registrar" : "admin";
 
     const user = await User.create({
       email,
       password: hashedPassword,
-      account_type: role,
+      account_type: accountType,
     }, { transaction });
 
     await Admin.create({
@@ -153,7 +165,7 @@ export const registerStaff = async (req: Request, res: Response) => {
       user: {
         user_id: user.user_id,
         email: user.email,
-        account_type: role,
+        account_type: accountType,
         roles: [role],
       },
     });
@@ -455,6 +467,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
 
       const roles = userRoles.map((r: any) => r.role_name);
+      const permissions = getPermissionsForRoles(roles);
       const effectiveAccountType = resolveEffectiveAccountType(
         user.account_type,
         roles
@@ -472,7 +485,12 @@ export const registerStudent = async (req: Request, res: Response) => {
             type: QueryTypes.SELECT,
           }
         );
-      } else if (["admin", "registrar"].includes(effectiveAccountType)) {
+      } else if (
+        ["admin", "registrar"].includes(effectiveAccountType) ||
+        roles.some((role) =>
+          ["dean", "college_admin", "accounting", "treasurer"].includes(role)
+        )
+      ) {
         profile = await sequelize.query(
           `SELECT a.* 
           FROM admin_profiles a 
@@ -491,21 +509,33 @@ export const registerStudent = async (req: Request, res: Response) => {
         email: user.email,
         account_type: effectiveAccountType,
         roles,
+        permissions,
       });
-
-      setTokenCookie(res, token);
+      const refreshToken = await issueRefreshToken({
+        userId: user.user_id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string | undefined,
+      });
+      const scopes = buildAuthScopes(roles, profile);
 
       return res.status(200).json({
         status: "success",
         message: "Login successful",
+        access_token: token,
+        refresh_token: refreshToken,
+        expires_in: 60 * 60,
+        token,
         user: {
           user_id: user.user_id,
           email: user.email,
           account_type: effectiveAccountType,
           roles,
+          permissions,
           status: user.status,
           created_at: user.created_at,
         },
+        permissions,
+        scopes,
         profile: profile || null,
       });
 
@@ -521,11 +551,14 @@ export const registerStudent = async (req: Request, res: Response) => {
 
   export const logout = async (req: Request, res: Response) => {
     try {
-      res.clearCookie('token', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict'
-      });
+      const refreshToken =
+        typeof req.body?.refresh_token === "string"
+          ? req.body.refresh_token.trim()
+          : "";
+
+      if (refreshToken) {
+        await revokeRefreshToken(refreshToken);
+      }
 
       return res.status(200).json({
         status: "success",
@@ -541,7 +574,7 @@ export const registerStudent = async (req: Request, res: Response) => {
   };
 
 
- export const checkAuth = async (req: Request, res: Response) => {
+export const checkAuth = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;
 
@@ -597,6 +630,7 @@ export const registerStudent = async (req: Request, res: Response) => {
     );
 
     const roles = rolesResult.map((r: any) => r.role_name);
+    const permissions = getPermissionsForRoles(roles);
     const effectiveAccountType = resolveEffectiveAccountType(
       user.account_type,
       roles
@@ -672,7 +706,12 @@ export const registerStudent = async (req: Request, res: Response) => {
         };
       }
 
-    } else if (["admin", "registrar"].includes(effectiveAccountType)) {
+    } else if (
+      ["admin", "registrar"].includes(effectiveAccountType) ||
+      roles.some((role) =>
+        ["dean", "college_admin", "accounting", "treasurer"].includes(role)
+      )
+    ) {
       const admins: any[] = await sequelize.query(
         `
         SELECT *
@@ -695,8 +734,11 @@ export const registerStudent = async (req: Request, res: Response) => {
         ...user,
         account_type: effectiveAccountType,
         roles,
+        permissions,
       },
       roles,
+      permissions,
+      scopes: buildAuthScopes(roles, profile),
       profile,
     });
 
@@ -706,6 +748,107 @@ export const registerStudent = async (req: Request, res: Response) => {
       status: "error",
       authenticated: false,
       message: "Internal server error",
+    });
+  }
+};
+
+export const refreshAccessToken = async (req: Request, res: Response) => {
+  try {
+    const refreshToken =
+      typeof req.body?.refresh_token === "string"
+        ? req.body.refresh_token.trim()
+        : "";
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: "error",
+        message: "refresh_token is required",
+      });
+    }
+
+    const tokenRow = await findRefreshToken(refreshToken);
+
+    if (!tokenRow) {
+      return res.status(401).json({
+        status: "error",
+        message: "Refresh token is invalid or expired",
+      });
+    }
+
+    const users: any[] = await sequelize.query(
+      `
+      SELECT user_id, email, account_type, status, created_at
+      FROM users
+      WHERE user_id = :userId
+      LIMIT 1
+      `,
+      {
+        replacements: { userId: tokenRow.user_id },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const user = users[0];
+    if (!user || user.status !== "active") {
+      await revokeRefreshTokenById(tokenRow.refresh_token_id);
+      return res.status(401).json({
+        status: "error",
+        message: "User is inactive or missing",
+      });
+    }
+
+    const roleRows: any[] = await sequelize.query(
+      `
+      SELECT r.role_name
+      FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.role_id
+      WHERE ur.user_id = :userId
+      `,
+      {
+        replacements: { userId: user.user_id },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const roles = roleRows.map((row: any) => row.role_name);
+    const permissions = getPermissionsForRoles(roles);
+    const effectiveAccountType = resolveEffectiveAccountType(
+      user.account_type,
+      roles
+    );
+
+    const accessToken = generateToken({
+      user_id: user.user_id,
+      email: user.email,
+      account_type: effectiveAccountType,
+      roles,
+      permissions,
+    });
+
+    const rotatedRefreshToken = await issueRefreshToken({
+      userId: user.user_id,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string | undefined,
+      rotatedFromId: tokenRow.refresh_token_id,
+    });
+
+    await revokeRefreshTokenById(tokenRow.refresh_token_id);
+
+    return res.status(200).json({
+      status: "success",
+      access_token: accessToken,
+      refresh_token: rotatedRefreshToken,
+      expires_in: 60 * 60,
+      permissions,
+      scopes: {
+        roles,
+      },
+    });
+  } catch (error) {
+    console.error("REFRESH ACCESS TOKEN ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to refresh access token",
     });
   }
 };

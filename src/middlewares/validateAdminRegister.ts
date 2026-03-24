@@ -5,6 +5,14 @@ export const validateAdminRegister = (
   res: Response,
   next: NextFunction
 ) => {
+  const allowedRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "accounting",
+    "treasurer",
+  ];
   let {
     email,
     password,
@@ -53,10 +61,10 @@ export const validateAdminRegister = (
 
   if (!role?.trim()) {
     errors.push({ field: "role", message: "Role is required" });
-  } else if (!["admin", "registrar"].includes(role.trim().toLowerCase())) {
+  } else if (!allowedRoles.includes(role.trim().toLowerCase())) {
     errors.push({
       field: "role",
-      message: "Role must be admin or registrar",
+      message: `Role must be one of: ${allowedRoles.join(", ")}`,
     });
   }
 
