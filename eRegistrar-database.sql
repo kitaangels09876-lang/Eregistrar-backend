@@ -27,6 +27,7 @@
         role_id INT NOT NULL,
         assigned_by INT NULL,
         assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_user_role_user (user_id),
         FOREIGN KEY (user_id) REFERENCES users(user_id),
         FOREIGN KEY (role_id) REFERENCES roles(role_id),
         FOREIGN KEY (assigned_by) REFERENCES users(user_id)
@@ -222,7 +223,7 @@ CREATE TABLE document_requests (
     document_type_id INT NOT NULL,
 
     purpose VARCHAR(255) NOT NULL,
-    delivery_method ENUM('pickup','delivery','email') NOT NULL,
+    delivery_method ENUM('pickup') NOT NULL,
     delivery_address TEXT NULL,
     quantity INT NOT NULL DEFAULT 1,
 
@@ -766,6 +767,7 @@ CREATE TABLE notifications (
         college_id INT AUTO_INCREMENT PRIMARY KEY,
         college_code VARCHAR(50) NULL,
         college_name VARCHAR(255) NOT NULL,
+        UNIQUE KEY uniq_workflow_college_code (college_code),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;
 
@@ -775,6 +777,7 @@ CREATE TABLE notifications (
         department_code VARCHAR(50) NULL,
         department_name VARCHAR(255) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_workflow_department_code (college_id, department_code),
         FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
     ) ENGINE=InnoDB;
 
@@ -809,6 +812,7 @@ CREATE TABLE notifications (
         college_id INT NOT NULL,
         is_active TINYINT(1) DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_workflow_college_admin_assignment (user_id, college_id),
         FOREIGN KEY (user_id) REFERENCES users(user_id),
         FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
     ) ENGINE=InnoDB;
@@ -1014,3 +1018,178 @@ CREATE TABLE notifications (
         FOREIGN KEY (workflow_release_record_id) REFERENCES workflow_release_records(workflow_release_record_id) ON DELETE SET NULL,
         FOREIGN KEY (acted_by_user_id) REFERENCES users(user_id)
     ) ENGINE=InnoDB;
+
+    -- ===========================================================
+    -- DEFAULT BOOTSTRAP DATA
+    -- ===========================================================
+
+    INSERT INTO users (email, password, account_type, status) VALUES
+    ('admin@tmc.edu.ph', '$2b$10$ISlPEXvkErg85asxOf2g/.F0nkdKV9oRGk5deaACd104WOB3hMP66', 'admin', 'active'),
+    ('registrar@tmc.edu.ph', '$2b$10$NaE8QRn699wic3nr7AQVl.91UOWoI.jd7L5swX1zst4mUCnzqB4VS', 'registrar', 'active'),
+    ('dean@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('collegeadmin@tmc.edu.ph', '$2b$10$LKHRJIYDfAsbXI5Zol2FDumhg4xyx.5f4Ql0/P37a6a4T/OnLpvv2', 'college_admin', 'active'),
+    ('accounting@tmc.edu.ph', '$2b$10$u1XcNnpsZ30jaekhPHqfKOGpz3Hi5hAGifoBgJo5A00ClcWw/ROlO', 'accounting', 'active'),
+    ('treasurer@tmc.edu.ph', '$2b$10$rs89aL.8RjQu86ycypCEvuMPCGzrFz9O0AjvCXQDYCRSXmYYhJIKu', 'treasurer', 'active'),
+    ('student@tmc.edu.ph', '$2b$10$w38ZrRYzw0UkpcHzPtVbLu9CM1kW5cHG5d.kdXnL9qpV8heAGPK1e', 'student', 'active'),
+    ('alumni@tmc.edu.ph', '$2b$10$c5ocrXofbiCovGmvIxtjFuLEqBiFlU..ycByvqhXyS3t6Rvn7osOa', 'alumni', 'active'),
+    ('clark.villamor@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('marina.polestico@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('elmira.negro@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('judith.austria@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('antonette.nugal@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
+    ('julie.maestrado@tmc.edu.ph', '$2b$10$LKHRJIYDfAsbXI5Zol2FDumhg4xyx.5f4Ql0/P37a6a4T/OnLpvv2', 'college_admin', 'active'),
+    ('iris.lloren@tmc.edu.ph', '$2b$10$NaE8QRn699wic3nr7AQVl.91UOWoI.jd7L5swX1zst4mUCnzqB4VS', 'registrar', 'active')
+    ON DUPLICATE KEY UPDATE
+        password = VALUES(password),
+        account_type = VALUES(account_type),
+        status = VALUES(status);
+
+    INSERT IGNORE INTO user_roles (user_id, role_id, assigned_by)
+    SELECT u.user_id, r.role_id, CASE WHEN u.email IN ('admin@tmc.edu.ph', 'student@tmc.edu.ph') THEN NULL ELSE admin_user.user_id END
+    FROM users u
+    JOIN roles r ON r.role_name =
+      CASE
+        WHEN u.email = 'admin@tmc.edu.ph' THEN 'admin'
+        WHEN u.email IN ('registrar@tmc.edu.ph', 'iris.lloren@tmc.edu.ph') THEN 'registrar'
+        WHEN u.email IN ('dean@tmc.edu.ph', 'clark.villamor@tmc.edu.ph', 'marina.polestico@tmc.edu.ph', 'elmira.negro@tmc.edu.ph', 'judith.austria@tmc.edu.ph', 'antonette.nugal@tmc.edu.ph') THEN 'dean'
+        WHEN u.email IN ('collegeadmin@tmc.edu.ph', 'julie.maestrado@tmc.edu.ph') THEN 'college_admin'
+        WHEN u.email = 'accounting@tmc.edu.ph' THEN 'accounting'
+        WHEN u.email = 'treasurer@tmc.edu.ph' THEN 'treasurer'
+        WHEN u.email = 'student@tmc.edu.ph' THEN 'student'
+        WHEN u.email = 'alumni@tmc.edu.ph' THEN 'alumni'
+      END
+    LEFT JOIN users admin_user ON admin_user.email = 'admin@tmc.edu.ph'
+    WHERE u.email IN (
+      'admin@tmc.edu.ph',
+      'registrar@tmc.edu.ph',
+      'dean@tmc.edu.ph',
+      'collegeadmin@tmc.edu.ph',
+      'accounting@tmc.edu.ph',
+      'treasurer@tmc.edu.ph',
+      'student@tmc.edu.ph',
+      'alumni@tmc.edu.ph',
+      'clark.villamor@tmc.edu.ph',
+      'marina.polestico@tmc.edu.ph',
+      'elmira.negro@tmc.edu.ph',
+      'judith.austria@tmc.edu.ph',
+      'antonette.nugal@tmc.edu.ph',
+      'julie.maestrado@tmc.edu.ph',
+      'iris.lloren@tmc.edu.ph'
+    );
+
+    INSERT INTO courses (course_code, course_name, course_description, department) VALUES
+    ('BSIT', 'Bachelor of Science in Information Technology', 'Default seeded BSIT program for registrar workflow routing.', 'Department of Information Technology'),
+    ('BSBA', 'Bachelor of Science in Business Administration', 'Default seeded BSBA program for registrar workflow routing.', 'Department of Business Administration'),
+    ('ABPOLSCI', 'Bachelor of Arts in Political Science', 'Default seeded AB Political Science program for College of Arts and Sciences routing.', 'College of Arts and Sciences'),
+    ('BSCRIM', 'Bachelor of Science in Criminology', 'Default seeded BS Criminology program for College of Criminal Justice Education routing.', 'College of Criminal Justice Education'),
+    ('BSOA', 'Bachelor of Science in Office Administration', 'Default seeded BSOA program for College of Office Administration routing.', 'College of Office Administration'),
+    ('BSED', 'Bachelor of Secondary Education', 'Default seeded BSED program for College of Education routing.', 'College of Education'),
+    ('BEED', 'Bachelor of Elementary Education', 'Default seeded BEED program for College of Education routing.', 'College of Education')
+    ON DUPLICATE KEY UPDATE
+        course_name = VALUES(course_name),
+        course_description = VALUES(course_description),
+        department = VALUES(department);
+
+    INSERT INTO admin_profiles (user_id, first_name, middle_name, last_name, contact_number)
+    SELECT u.user_id, v.first_name, v.middle_name, v.last_name, v.contact_number
+    FROM users u
+    JOIN (
+      SELECT 'admin@tmc.edu.ph' AS email, 'System' AS first_name, NULL AS middle_name, 'Administrator' AS last_name, '09170000001' AS contact_number
+      UNION ALL SELECT 'registrar@tmc.edu.ph', 'Rina', NULL, 'Registrar', '09170000002'
+      UNION ALL SELECT 'dean@tmc.edu.ph', 'Dario', NULL, 'Dean', '09170000003'
+      UNION ALL SELECT 'collegeadmin@tmc.edu.ph', 'Celia', NULL, 'Administrator', '09170000004'
+      UNION ALL SELECT 'accounting@tmc.edu.ph', 'Ana', NULL, 'Accounting', '09170000005'
+      UNION ALL SELECT 'treasurer@tmc.edu.ph', 'Teresa', NULL, 'Treasurer', '09170000006'
+      UNION ALL SELECT 'clark.villamor@tmc.edu.ph', 'Clark', 'Kevin V.', 'Villamor', '09170000007'
+      UNION ALL SELECT 'marina.polestico@tmc.edu.ph', 'Marina', 'C.', 'Polestico', '09170000008'
+      UNION ALL SELECT 'elmira.negro@tmc.edu.ph', 'Elmira', 'O.', 'Negro', '09170000009'
+      UNION ALL SELECT 'judith.austria@tmc.edu.ph', 'Judith', 'V.', 'Austria', '09170000010'
+      UNION ALL SELECT 'antonette.nugal@tmc.edu.ph', 'Antonette', 'T.', 'Nugal', '09170000011'
+      UNION ALL SELECT 'julie.maestrado@tmc.edu.ph', 'Julie', 'T.', 'Maestrado', '09170000012'
+      UNION ALL SELECT 'iris.lloren@tmc.edu.ph', 'Iris Mae', 'C.', 'Lloren', '09170000013'
+    ) v ON v.email = u.email
+    ON DUPLICATE KEY UPDATE
+        first_name = VALUES(first_name),
+        middle_name = VALUES(middle_name),
+        last_name = VALUES(last_name),
+        contact_number = VALUES(contact_number);
+
+    INSERT INTO workflow_colleges (college_code, college_name) VALUES
+    ('CHE', 'College of Higher Education'),
+    ('CCS', 'College of Computer Studies'),
+    ('CAS', 'College of Arts and Sciences'),
+    ('CCJE', 'College of Criminal Justice Education'),
+    ('COA', 'College of Office Administration'),
+    ('COE', 'College of Education')
+    ON DUPLICATE KEY UPDATE
+        college_name = VALUES(college_name);
+
+    INSERT INTO workflow_departments (college_id, department_code, department_name)
+    SELECT wc.college_id, v.department_code, v.department_name
+    FROM workflow_colleges wc
+    JOIN (
+      SELECT 'CHE' AS college_code, 'DIT' AS department_code, 'Department of Information Technology' AS department_name
+      UNION ALL SELECT 'CHE', 'DBA', 'Department of Business Administration'
+      UNION ALL SELECT 'CCS', 'DCS', 'Department of Computer Studies'
+      UNION ALL SELECT 'CAS', 'CAS', 'College of Arts and Sciences'
+      UNION ALL SELECT 'CCJE', 'CCJE', 'College of Criminal Justice Education'
+      UNION ALL SELECT 'COA', 'COA', 'College of Office Administration'
+      UNION ALL SELECT 'COE', 'COE', 'College of Education'
+    ) v ON v.college_code = wc.college_code
+    WHERE NOT EXISTS (
+      SELECT 1 FROM workflow_departments wd
+      WHERE wd.college_id = wc.college_id AND wd.department_code = v.department_code
+    );
+
+    INSERT INTO workflow_course_scopes (course_id, college_id, department_id)
+    SELECT c.course_id, wc.college_id, wd.department_id
+    FROM courses c
+    JOIN (
+      SELECT 'BSIT' AS course_code, 'CCS' AS college_code, 'DCS' AS department_code
+      UNION ALL SELECT 'BSBA', 'CHE', 'DBA'
+      UNION ALL SELECT 'ABPOLSCI', 'CAS', 'CAS'
+      UNION ALL SELECT 'BSCRIM', 'CCJE', 'CCJE'
+      UNION ALL SELECT 'BSOA', 'COA', 'COA'
+      UNION ALL SELECT 'BSED', 'COE', 'COE'
+      UNION ALL SELECT 'BEED', 'COE', 'COE'
+    ) v ON v.course_code = c.course_code
+    JOIN workflow_colleges wc ON wc.college_code = v.college_code
+    JOIN workflow_departments wd ON wd.college_id = wc.college_id AND wd.department_code = v.department_code
+    ON DUPLICATE KEY UPDATE
+        college_id = VALUES(college_id),
+        department_id = VALUES(department_id);
+
+    INSERT INTO workflow_dean_assignments (user_id, course_id, department_id, college_id, is_active)
+    SELECT u.user_id, c.course_id, wcs.department_id, wcs.college_id, 1
+    FROM users u
+    JOIN (
+      SELECT 'dean@tmc.edu.ph' AS email, 'BSBA' AS course_code
+      UNION ALL SELECT 'clark.villamor@tmc.edu.ph', 'BSIT'
+      UNION ALL SELECT 'marina.polestico@tmc.edu.ph', 'ABPOLSCI'
+      UNION ALL SELECT 'elmira.negro@tmc.edu.ph', 'BSCRIM'
+      UNION ALL SELECT 'judith.austria@tmc.edu.ph', 'BSOA'
+      UNION ALL SELECT 'antonette.nugal@tmc.edu.ph', 'BSED'
+      UNION ALL SELECT 'antonette.nugal@tmc.edu.ph', 'BEED'
+    ) v ON v.email = u.email
+    JOIN courses c ON c.course_code = v.course_code
+    JOIN workflow_course_scopes wcs ON wcs.course_id = c.course_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM workflow_dean_assignments wda
+      WHERE wda.user_id = u.user_id AND wda.course_id = c.course_id
+    );
+
+    UPDATE workflow_dean_assignments wda
+    JOIN users u ON u.user_id = wda.user_id
+    JOIN courses c ON c.course_id = wda.course_id
+    SET wda.is_active = 0
+    WHERE u.email = 'dean@tmc.edu.ph' AND c.course_code = 'BSIT';
+
+    INSERT INTO workflow_college_admin_assignments (user_id, college_id, is_active)
+    SELECT u.user_id, wc.college_id, 1
+    FROM users u
+    JOIN workflow_colleges wc ON wc.college_code IN ('CHE', 'CCS', 'CAS', 'CCJE', 'COA', 'COE')
+    WHERE u.email IN ('collegeadmin@tmc.edu.ph', 'julie.maestrado@tmc.edu.ph')
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow_college_admin_assignments wcaa
+        WHERE wcaa.user_id = u.user_id AND wcaa.college_id = wc.college_id
+      );

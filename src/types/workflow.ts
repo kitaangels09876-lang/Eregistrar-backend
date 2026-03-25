@@ -34,7 +34,7 @@ export interface WorkflowRequestPayload {
   course_text?: string | null;
   last_semester_attended?: string | null;
   purpose: string;
-  delivery_method: "pickup" | "email" | "courier";
+  delivery_method: "pickup";
   requested_document_ids: number[];
   educational_background: WorkflowFormEducationItem[];
   attachments?: WorkflowRequestAttachmentInput[];

@@ -40,6 +40,28 @@ const PAYMENT_VISIBLE_STATUSES: WorkflowStatus[] = [
   "UNDER_REGISTRAR_PROCESSING",
 ];
 
+const QUEUE_ACCESS_RULES: Array<{
+  statuses: WorkflowStatus[];
+  roles: string[];
+  permissions: string[];
+}> = [
+  {
+    statuses: ["UNDER_DEAN_APPROVAL"],
+    roles: ["dean", "admin"],
+    permissions: ["approval.dean.view", "request.view.all"],
+  },
+  {
+    statuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
+    roles: ["college_admin", "admin"],
+    permissions: ["approval.college_admin.view", "request.view.all"],
+  },
+  {
+    statuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
+    roles: ["accounting", "treasurer", "admin"],
+    permissions: ["payment.confirm", "request.view.all"],
+  },
+];
+
 const VIEW_PERMISSION_RULES = {
   portal: "request.view.own",
   registrar: "request.view.all",
@@ -63,8 +85,6 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
   UNDER_REGISTRAR_PROCESSING: ["payment.confirm"],
   DOCUMENT_GENERATION: ["document.prepare"],
   READY_FOR_RELEASE: ["document.generate"],
-  OUT_FOR_DELIVERY: ["document.release"],
-  RELEASED: ["document.release"],
   CLAIMED: ["document.claim"],
   COMPLETED: ["document.release", "document.claim"],
   CANCELLED: ["request.cancel.own", "request.cancel.any"],
@@ -88,8 +108,6 @@ const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
   UNDER_REGISTRAR_PROCESSING: ["treasurer", "accounting", "admin"],
   DOCUMENT_GENERATION: ["registrar", "admin"],
   READY_FOR_RELEASE: ["registrar", "admin"],
-  OUT_FOR_DELIVERY: ["registrar", "admin"],
-  RELEASED: ["registrar", "admin"],
   CLAIMED: ["registrar", "admin"],
   COMPLETED: ["registrar", "admin"],
   CANCELLED: ["student", "alumni", "registrar", "admin"],
@@ -106,6 +124,15 @@ const canPerformWorkflowRule = (
 ) =>
   roles.some((role) => rule.roles.includes(role)) &&
   hasAnyPermission(user, rule.permissions);
+
+const assertSignaturePresent = (
+  signatureFilePath: unknown,
+  message: string
+) => {
+  if (typeof signatureFilePath !== "string" || !signatureFilePath.trim()) {
+    throw new Error(message);
+  }
+};
 
 const parseJsonField = <T>(value: any, fallback: T): T => {
   if (!value) {
@@ -381,7 +408,7 @@ const upsertReleaseRecord = async ({
         released_by_user_id = :releasedByUserId,
         released_at = :releasedAt,
         recipient_name = :recipientName,
-        recipient_email = :recipientEmail,
+        recipient_email = NULL,
         authorized_representative_name = :authorizedRepresentativeName,
         authorized_representative_id_type = :authorizedRepresentativeIdType,
         authorized_representative_id_number = :authorizedRepresentativeIdNumber,
@@ -392,9 +419,9 @@ const upsertReleaseRecord = async ({
         authorization_letter_file_path = :authorizationLetterFilePath,
         claimant_id_file_path = :claimantIdFilePath,
         signature_file_path = :signatureFilePath,
-        courier_name = :courierName,
-        tracking_number = :trackingNumber,
-        dispatch_at = :dispatchAt,
+        courier_name = NULL,
+        tracking_number = NULL,
+        dispatch_at = NULL,
         delivery_confirmed_at = :deliveryConfirmedAt
       WHERE workflow_release_record_id = :releaseRecordId
       `,
@@ -408,7 +435,6 @@ const upsertReleaseRecord = async ({
           releasedByUserId: releaseSnapshot.released_by_user_id || actedByUserId,
           releasedAt: releaseSnapshot.date_released || null,
           recipientName: releaseSnapshot.recipient_name || releaseSnapshot.claimant_name || null,
-          recipientEmail: releaseSnapshot.receiver_email || null,
           authorizedRepresentativeName:
             releaseSnapshot.authorized_representative_name || null,
           authorizedRepresentativeIdType:
@@ -423,9 +449,6 @@ const upsertReleaseRecord = async ({
             releaseSnapshot.authorization_letter_file_path || null,
           claimantIdFilePath: releaseSnapshot.claimant_id_file_path || null,
           signatureFilePath: releaseSnapshot.signature_file_path || null,
-          courierName: releaseSnapshot.courier_name || null,
-          trackingNumber: releaseSnapshot.tracking_number || null,
-          dispatchAt: releaseSnapshot.dispatched_at || null,
           deliveryConfirmedAt: releaseSnapshot.completed_at || null,
         },
         type: QueryTypes.UPDATE,
@@ -470,7 +493,7 @@ const upsertReleaseRecord = async ({
       :releasedByUserId,
       :releasedAt,
       :recipientName,
-      :recipientEmail,
+      NULL,
       :authorizedRepresentativeName,
       :authorizedRepresentativeIdType,
       :authorizedRepresentativeIdNumber,
@@ -481,9 +504,9 @@ const upsertReleaseRecord = async ({
       :authorizationLetterFilePath,
       :claimantIdFilePath,
       :signatureFilePath,
-      :courierName,
-      :trackingNumber,
-      :dispatchAt,
+      NULL,
+      NULL,
+      NULL,
       :deliveryConfirmedAt
     )
     `,
@@ -497,7 +520,6 @@ const upsertReleaseRecord = async ({
         releasedByUserId: actedByUserId,
         releasedAt: releaseSnapshot.date_released || null,
         recipientName: releaseSnapshot.recipient_name || releaseSnapshot.claimant_name || null,
-        recipientEmail: releaseSnapshot.receiver_email || null,
         authorizedRepresentativeName:
           releaseSnapshot.authorized_representative_name || null,
         authorizedRepresentativeIdType:
@@ -512,9 +534,6 @@ const upsertReleaseRecord = async ({
           releaseSnapshot.authorization_letter_file_path || null,
         claimantIdFilePath: releaseSnapshot.claimant_id_file_path || null,
         signatureFilePath: releaseSnapshot.signature_file_path || null,
-        courierName: releaseSnapshot.courier_name || null,
-        trackingNumber: releaseSnapshot.tracking_number || null,
-        dispatchAt: releaseSnapshot.dispatched_at || null,
         deliveryConfirmedAt: releaseSnapshot.completed_at || null,
       },
       type: QueryTypes.INSERT,
@@ -617,16 +636,6 @@ const WORKFLOW_ACTION_RULES: Record<
     permissions: ["document.generate"],
     currentStatuses: ["DOCUMENT_GENERATION"],
   },
-  release_dispatch: {
-    roles: ["registrar", "admin"],
-    permissions: ["document.release"],
-    currentStatuses: ["READY_FOR_RELEASE"],
-  },
-  release_email: {
-    roles: ["registrar", "admin"],
-    permissions: ["document.release"],
-    currentStatuses: ["READY_FOR_RELEASE"],
-  },
   release_claim: {
     roles: ["registrar", "admin"],
     permissions: ["document.claim"],
@@ -635,7 +644,7 @@ const WORKFLOW_ACTION_RULES: Record<
   release_complete: {
     roles: ["registrar", "admin"],
     permissions: ["document.release", "document.claim"],
-    currentStatuses: ["OUT_FOR_DELIVERY", "RELEASED", "CLAIMED"],
+    currentStatuses: ["CLAIMED"],
   },
   request_cancel: {
     roles: ["student", "alumni", "registrar", "admin"],
@@ -650,7 +659,6 @@ const WORKFLOW_ACTION_RULES: Record<
       "FEE_ASSESSED",
       "AWAITING_PAYMENT",
       "PAYMENT_SUBMITTED",
-      "READY_FOR_RELEASE",
     ],
   },
   registrar_reject: {
@@ -705,6 +713,7 @@ const ensureWorkflowSchema = async () => {
       college_id INT AUTO_INCREMENT PRIMARY KEY,
       college_code VARCHAR(50) NULL,
       college_name VARCHAR(255) NOT NULL,
+      UNIQUE KEY uniq_workflow_college_code (college_code),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;
   `);
@@ -716,6 +725,7 @@ const ensureWorkflowSchema = async () => {
       department_code VARCHAR(50) NULL,
       department_name VARCHAR(255) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_workflow_department_code (college_id, department_code),
       FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
     ) ENGINE=InnoDB;
   `);
@@ -756,6 +766,7 @@ const ensureWorkflowSchema = async () => {
       college_id INT NOT NULL,
       is_active TINYINT(1) DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_workflow_college_admin_assignment (user_id, college_id),
       FOREIGN KEY (user_id) REFERENCES users(user_id),
       FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
     ) ENGINE=InnoDB;
@@ -1152,17 +1163,10 @@ const buildDocumentAccessPolicy = (detail: any, user?: AuthUser) => {
   ).toLowerCase();
 
   const isPickup = releaseMethod === "pickup";
-  const isEmail = releaseMethod === "email";
-  const isCourier = releaseMethod === "courier";
-  const releasedStatuses = ["RELEASED", "CLAIMED", "COMPLETED"];
 
   return {
-    can_view_generated_document:
-      (isEmail && releasedStatuses.includes(currentStatus)) ||
-      (isCourier && currentStatus === "COMPLETED"),
-    can_download_generated_document:
-      (isEmail && releasedStatuses.includes(currentStatus)) ||
-      (isCourier && currentStatus === "COMPLETED"),
+    can_view_generated_document: false,
+    can_download_generated_document: false,
     can_view_claim_stub:
       isPickup &&
       ["READY_FOR_RELEASE", "CLAIMED", "COMPLETED"].includes(currentStatus) &&
@@ -1171,11 +1175,7 @@ const buildDocumentAccessPolicy = (detail: any, user?: AuthUser) => {
       isPickup &&
       ["READY_FOR_RELEASE", "CLAIMED", "COMPLETED"].includes(currentStatus) &&
       Boolean(detail.latest_claim_stub),
-    generated_document_reason: isPickup
-      ? "pickup_release_blocks_student_download"
-      : isEmail
-      ? "available_after_release"
-      : "available_after_delivery_completion",
+    generated_document_reason: "pickup_release_blocks_student_download",
     claim_stub_reason: isPickup ? "pickup_claim_required" : "claim_stub_not_applicable",
   };
 };
@@ -1811,8 +1811,8 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     }
   }
 
-  if (!["pickup", "email", "courier"].includes(String(payload.delivery_method || "").toLowerCase())) {
-    throw new Error("Invalid delivery method");
+  if (String(payload.delivery_method || "").toLowerCase() !== "pickup") {
+    throw new Error("Only pickup release is supported");
   }
 
   const [student]: any[] = await sequelize.query(
@@ -2137,10 +2137,14 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
 export const listWorkflowRequests = async (
   user: AuthUser,
   filters?: {
+    search?: string;
     status?: string;
+    payment_status?: string;
     document_type_id?: string | number;
     from_date?: string;
     to_date?: string;
+    page?: number;
+    limit?: number;
   }
 ) => {
   await ensureWorkflowSchema();
@@ -2148,6 +2152,9 @@ export const listWorkflowRequests = async (
   const roles = getRoleNames(user);
   const whereClauses: string[] = [];
   const replacements: Record<string, any> = {};
+  const page = Math.max(1, Number(filters?.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(filters?.limit) || 12));
+  const offset = (page - 1) * limit;
 
   if (
     roles.some((role) => PORTAL_ROLES.includes(role as (typeof PORTAL_ROLES)[number])) ||
@@ -2195,6 +2202,13 @@ export const listWorkflowRequests = async (
     replacements.statusFilter = filters.status;
   }
 
+  if (filters?.payment_status) {
+    whereClauses.push(
+      "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(wr.payment_snapshot_json, '$.payment_status')), 'PENDING') = :paymentStatusFilter"
+    );
+    replacements.paymentStatusFilter = filters.payment_status;
+  }
+
   if (filters?.from_date) {
     whereClauses.push("DATE(wr.submitted_at) >= :fromDateFilter");
     replacements.fromDateFilter = filters.from_date;
@@ -2211,6 +2225,38 @@ export const listWorkflowRequests = async (
     );
     replacements.documentTypeFilter = Number(filters.document_type_id);
   }
+
+  if (filters?.search?.trim()) {
+    whereClauses.push(
+      `(
+        LOWER(wr.request_reference) LIKE :searchFilter
+        OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.full_name')), '')) LIKE :searchFilter
+        OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.course_name')), '')) LIKE :searchFilter
+        OR LOWER(COALESCE(wr.purpose, '')) LIKE :searchFilter
+        OR EXISTS (
+          SELECT 1
+          FROM workflow_request_items wri_search
+          WHERE wri_search.workflow_request_id = wr.workflow_request_id
+            AND LOWER(COALESCE(wri_search.document_name, '')) LIKE :searchFilter
+        )
+      )`
+    );
+    replacements.searchFilter = `%${filters.search.trim().toLowerCase()}%`;
+  }
+
+  const totalRows = (await sequelize.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM workflow_requests wr
+    ${whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""}
+    `,
+    {
+      replacements,
+      type: QueryTypes.SELECT,
+    }
+  )) as Array<{ total: number | string }>;
+
+  const total = Number(totalRows[0]?.total || 0);
 
   const rows: any[] = await sequelize.query(
     `
@@ -2259,9 +2305,14 @@ export const listWorkflowRequests = async (
     FROM workflow_requests wr
     ${whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""}
     ORDER BY wr.updated_at DESC, wr.workflow_request_id DESC
+    LIMIT :limit OFFSET :offset
     `,
     {
-      replacements,
+      replacements: {
+        ...replacements,
+        limit,
+        offset,
+      },
       type: QueryTypes.SELECT,
     }
   );
@@ -2301,7 +2352,7 @@ export const listWorkflowRequests = async (
     return acc;
   }, {});
 
-  return rows.map((row) => {
+  const items = rows.map((row) => {
     const mapped = {
       ...row,
       academic_snapshot: parseJsonField(row.academic_snapshot_json, {}),
@@ -2326,6 +2377,16 @@ export const listWorkflowRequests = async (
       document_access: buildDocumentAccessPolicy(mapped, user),
     };
   });
+
+  return {
+    items,
+    meta: {
+      page,
+      limit,
+      total,
+      total_pages: total > 0 ? Math.ceil(total / limit) : 1,
+    },
+  };
 };
 
 export const getWorkflowRequestDetail = async (
@@ -2400,21 +2461,45 @@ export const advanceWorkflowRequest = async (
     if (!detail.dean_user_id) {
       throw new Error("Dean assignment is missing for this request");
     }
+    assertSignaturePresent(
+      updates.signature_file_path,
+      "Registrar signature is required before forwarding to dean approval"
+    );
     approvalSnapshot.registrar_status = "VERIFIED";
     approvalSnapshot.registrar_name =
       updates.registrar_name || approvalSnapshot.registrar_name || "Registrar";
     approvalSnapshot.registrar_forwarded_at = new Date().toISOString();
+    approvalSnapshot.registrar_signature_file_name =
+      updates.signature_file_name ||
+      approvalSnapshot.registrar_signature_file_name ||
+      null;
+    approvalSnapshot.registrar_signature_file_path =
+      updates.signature_file_path ||
+      approvalSnapshot.registrar_signature_file_path ||
+      null;
   }
 
   if (body.target_status === "DEAN_APPROVED") {
+    assertSignaturePresent(
+      updates.signature_file_path,
+      "Dean signature is required before approving this request"
+    );
     approvalSnapshot.dean_status = "APPROVED";
     approvalSnapshot.dean_name =
       updates.dean_name || approvalSnapshot.dean_name || "Dean";
     approvalSnapshot.dean_approved_at = new Date().toISOString();
     approvalSnapshot.dean_remarks = remarks;
+    approvalSnapshot.dean_signature_file_name =
+      updates.signature_file_name || approvalSnapshot.dean_signature_file_name || null;
+    approvalSnapshot.dean_signature_file_path =
+      updates.signature_file_path || approvalSnapshot.dean_signature_file_path || null;
   }
 
   if (body.target_status === "COLLEGE_ADMIN_APPROVED") {
+    assertSignaturePresent(
+      updates.signature_file_path,
+      "College administrator signature is required before approving this request"
+    );
     approvalSnapshot.college_admin_status = "APPROVED";
     approvalSnapshot.college_admin_name =
       updates.college_admin_name ||
@@ -2422,6 +2507,14 @@ export const advanceWorkflowRequest = async (
       "College Administrator";
     approvalSnapshot.college_admin_approved_at = new Date().toISOString();
     approvalSnapshot.college_admin_remarks = remarks;
+    approvalSnapshot.college_admin_signature_file_name =
+      updates.signature_file_name ||
+      approvalSnapshot.college_admin_signature_file_name ||
+      null;
+    approvalSnapshot.college_admin_signature_file_path =
+      updates.signature_file_path ||
+      approvalSnapshot.college_admin_signature_file_path ||
+      null;
   }
 
   if (body.target_status === "FEE_ASSESSED") {
@@ -2456,6 +2549,10 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "PAYMENT_CONFIRMED") {
+    assertSignaturePresent(
+      updates.signature_file_path,
+      "Treasurer or accounting signature is required before confirming payment"
+    );
     paymentSnapshot.payment_status = "CONFIRMED";
     paymentSnapshot.official_receipt_no =
       updates.official_receipt_no || paymentSnapshot.official_receipt_no || null;
@@ -2465,6 +2562,14 @@ export const advanceWorkflowRequest = async (
       paymentSnapshot.confirmed_by_name ||
       "Treasurer";
     paymentSnapshot.confirmation_notes = remarks;
+    paymentSnapshot.confirmed_by_signature_file_name =
+      updates.signature_file_name ||
+      paymentSnapshot.confirmed_by_signature_file_name ||
+      null;
+    paymentSnapshot.confirmed_by_signature_file_path =
+      updates.signature_file_path ||
+      paymentSnapshot.confirmed_by_signature_file_path ||
+      null;
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
@@ -2489,29 +2594,6 @@ export const advanceWorkflowRequest = async (
       detail.delivery_method;
     releaseSnapshot.release_notes = remarks;
     releaseSnapshot.release_status = "READY_FOR_RELEASE";
-  }
-
-  if (body.target_status === "OUT_FOR_DELIVERY") {
-    releaseSnapshot.release_method = "courier";
-    releaseSnapshot.courier_name =
-      updates.courier_name || releaseSnapshot.courier_name || null;
-    releaseSnapshot.tracking_number =
-      updates.tracking_number || releaseSnapshot.tracking_number || null;
-    releaseSnapshot.dispatched_at = new Date().toISOString();
-    releaseSnapshot.release_status = "OUT_FOR_DELIVERY";
-  }
-
-  if (body.target_status === "RELEASED") {
-    releaseSnapshot.release_method =
-      updates.release_method ||
-      releaseSnapshot.release_method ||
-      detail.delivery_method;
-    releaseSnapshot.date_released = new Date().toISOString();
-    releaseSnapshot.recipient_name =
-      updates.recipient_name || releaseSnapshot.recipient_name || null;
-    releaseSnapshot.receiver_email =
-      updates.receiver_email || releaseSnapshot.receiver_email || null;
-    releaseSnapshot.release_status = "RELEASED";
   }
 
   if (body.target_status === "CLAIMED") {
@@ -2707,8 +2789,6 @@ export const advanceWorkflowRequest = async (
   if (
     [
       "READY_FOR_RELEASE",
-      "OUT_FOR_DELIVERY",
-      "RELEASED",
       "CLAIMED",
       "COMPLETED",
       "CANCELLED",
@@ -2833,7 +2913,7 @@ export const advanceWorkflowRequest = async (
     });
   }
 
-  if (["RELEASED", "CLAIMED", "COMPLETED"].includes(body.target_status)) {
+  if (["CLAIMED", "COMPLETED"].includes(body.target_status)) {
     await createWorkflowNotification({
       userId: detail.student_user_id,
       title: "Release update",
@@ -3192,8 +3272,23 @@ export const listWorkflowQueueByStatuses = async (
   user: AuthUser,
   statuses: WorkflowStatus[]
 ) => {
-  const items = await listWorkflowRequests(user);
-  return items.filter((item) =>
+  const roles = getRoleNames(user);
+  const matchingRule = QUEUE_ACCESS_RULES.find((rule) =>
+    statuses.length === rule.statuses.length &&
+    statuses.every((status) => rule.statuses.includes(status))
+  );
+
+  if (matchingRule) {
+    const hasAllowedRole = roles.some((role) => matchingRule.roles.includes(role));
+    const hasRequiredPermission = hasAnyPermission(user, matchingRule.permissions);
+
+    if (!hasAllowedRole || !hasRequiredPermission) {
+      throw new Error("You do not have access to this workflow queue");
+    }
+  }
+
+  const result = await listWorkflowRequests(user, { page: 1, limit: 100 });
+  return result.items.filter((item) =>
     statuses.includes(item.current_status as WorkflowStatus)
   );
 };
@@ -3329,28 +3424,6 @@ export const processWorkflowAction = async (
       target_status: "READY_FOR_RELEASE",
       remarks: input.remarks,
       updates: input.updates,
-    });
-  }
-
-  if (action === "release_dispatch") {
-    return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "OUT_FOR_DELIVERY",
-      remarks: input.remarks,
-      updates: {
-        ...(input.updates || {}),
-        release_method: "courier",
-      },
-    });
-  }
-
-  if (action === "release_email") {
-    return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "RELEASED",
-      remarks: input.remarks,
-      updates: {
-        ...(input.updates || {}),
-        release_method: "email",
-      },
     });
   }
 

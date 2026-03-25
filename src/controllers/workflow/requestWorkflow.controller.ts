@@ -17,6 +17,34 @@ import {
 import { WorkflowStatus } from "../../constants/workflow";
 import { WorkflowRequestPayload } from "../../types/workflow";
 
+const resolveWorkflowErrorStatus = (error: unknown) => {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase();
+
+  if (
+    message.includes("unauthorized") ||
+    message.includes("authentication required") ||
+    message.includes("missing or invalid authorization")
+  ) {
+    return 401;
+  }
+
+  if (
+    message.includes("missing permission") ||
+    message.includes("do not have access") ||
+    message.includes("not allowed") ||
+    message.includes("forbidden")
+  ) {
+    return 403;
+  }
+
+  if (message.includes("not found")) {
+    return 404;
+  }
+
+  return 400;
+};
+
 const getAuthUser = (req: Request) => {
   const user = req.user;
 
@@ -29,6 +57,45 @@ const getAuthUser = (req: Request) => {
     account_type: user.account_type,
     roles: user.roles || [],
     permissions: user.permissions || [],
+  };
+};
+
+const parseJsonObject = (value: unknown) => {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, any>;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "object" && parsed && !Array.isArray(parsed)
+        ? (parsed as Record<string, any>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+};
+
+const getWorkflowActionPayload = (req: Request) => {
+  const body = req.body || {};
+  const updates = parseJsonObject(body.updates);
+  const file = (req as Request & { file?: Express.Multer.File }).file;
+
+  if (file) {
+    updates.signature_file_name = file.filename;
+    updates.signature_file_path = `/uploads/workflow/approval-signatures/${file.filename}`;
+  }
+
+  return {
+    remarks: typeof body.remarks === "string" ? body.remarks : undefined,
+    updates,
   };
 };
 
@@ -72,7 +139,7 @@ export const createWorkflowRequestHandler = async (req: Request, res: Response) 
       course_text: body.course_text || "",
       last_semester_attended: body.last_semester_attended || "",
       purpose: body.purpose || "",
-      delivery_method: body.delivery_method || "pickup",
+      delivery_method: "pickup",
       requested_document_ids: parseField<number[]>(body.requested_document_ids, []).map(Number),
       educational_background: parseField(body.educational_background, []),
       attachments: files.map((file) => ({
@@ -91,7 +158,7 @@ export const createWorkflowRequestHandler = async (req: Request, res: Response) 
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to create workflow request",
     });
@@ -100,21 +167,30 @@ export const createWorkflowRequestHandler = async (req: Request, res: Response) 
 
 export const listWorkflowRequestsHandler = async (req: Request, res: Response) => {
   try {
+    const parsedPage = Number(req.query.page);
+    const parsedLimit = Number(req.query.limit);
+
     const data = await listWorkflowRequests(getAuthUser(req), {
+      search: typeof req.query.search === "string" ? req.query.search : undefined,
       status: typeof req.query.status === "string" ? req.query.status : undefined,
+      payment_status:
+        typeof req.query.payment_status === "string" ? req.query.payment_status : undefined,
       document_type_id:
         typeof req.query.document_type_id === "string"
           ? req.query.document_type_id
           : undefined,
       from_date: typeof req.query.from_date === "string" ? req.query.from_date : undefined,
       to_date: typeof req.query.to_date === "string" ? req.query.to_date : undefined,
+      page: Number.isFinite(parsedPage) ? parsedPage : undefined,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
     });
     return res.json({
       status: "success",
-      data,
+      data: data.items,
+      meta: data.meta,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to list workflow requests",
     });
@@ -133,7 +209,7 @@ export const getWorkflowRequestDetailHandler = async (req: Request, res: Respons
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to load workflow request",
     });
@@ -155,7 +231,7 @@ export const advanceWorkflowRequestHandler = async (req: Request, res: Response)
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to advance workflow request",
     });
@@ -174,7 +250,7 @@ export const getWorkflowTimelineHandler = async (req: Request, res: Response) =>
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to load workflow timeline",
     });
@@ -190,7 +266,7 @@ export const listWorkflowQueueHandler = (statuses: WorkflowStatus[]) => {
         data,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(resolveWorkflowErrorStatus(error)).json({
         status: "error",
         message: error.message || "Failed to load workflow queue",
       });
@@ -205,7 +281,7 @@ const act = (action: string) => {
         Number(req.params.workflowRequestId || req.params.requestId),
         getAuthUser(req),
         action,
-        req.body || {}
+        getWorkflowActionPayload(req)
       );
 
       return res.json({
@@ -214,7 +290,7 @@ const act = (action: string) => {
         data,
       });
     } catch (error: any) {
-      return res.status(400).json({
+      return res.status(resolveWorkflowErrorStatus(error)).json({
         status: "error",
         message: error.message || "Failed to process workflow action",
       });
@@ -252,7 +328,7 @@ export const paymentSubmitHandler = async (req: Request, res: Response) => {
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to submit payment proof",
     });
@@ -260,8 +336,6 @@ export const paymentSubmitHandler = async (req: Request, res: Response) => {
 };
 export const documentPrepareHandler = act("document_prepare");
 export const documentFinalizeHandler = act("document_finalize");
-export const releaseDispatchHandler = act("release_dispatch");
-export const releaseEmailHandler = act("release_email");
 export const releaseClaimHandler = act("release_claim");
 export const releaseCompleteHandler = act("release_complete");
 export const requestCancelHandler = act("request_cancel");
@@ -284,7 +358,7 @@ export const getWorkflowRequestLatestDocumentHandler = async (
       data,
     });
   } catch (error: any) {
-    return res.status(404).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Generated request form not found",
     });
@@ -303,7 +377,7 @@ export const downloadWorkflowRequestLatestDocumentHandler = async (
 
     return res.redirect(data.file_path);
   } catch (error: any) {
-    return res.status(404).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Generated request form not found",
     });
@@ -325,7 +399,7 @@ export const getWorkflowRequestClaimStubHandler = async (
       data,
     });
   } catch (error: any) {
-    return res.status(404).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Claim stub not found",
     });
@@ -344,7 +418,7 @@ export const downloadWorkflowRequestClaimStubHandler = async (
 
     return res.redirect(data.file_path);
   } catch (error: any) {
-    return res.status(404).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Claim stub not found",
     });
@@ -381,7 +455,7 @@ export const claimVerificationLookupHandler = async (req: Request, res: Response
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Claim verification lookup failed",
     });
@@ -423,7 +497,7 @@ export const claimVerificationConfirmHandler = async (req: Request, res: Respons
       data,
     });
   } catch (error: any) {
-    return res.status(400).json({
+    return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
       message: error.message || "Failed to confirm claim",
     });

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticateToken } from "../../middlewares/auth.middleware";
 import {
+  uploadWorkflowApprovalSignature,
   uploadWorkflowClaimFiles,
   uploadWorkflowPaymentProof,
   uploadWorkflowRequestAttachments,
@@ -32,8 +33,6 @@ import {
   requestCancelHandler,
   releaseClaimHandler,
   releaseCompleteHandler,
-  releaseDispatchHandler,
-  releaseEmailHandler,
 } from "../../controllers/workflow/requestWorkflow.controller";
 import { WorkflowStatus } from "../../constants/workflow";
 
@@ -67,7 +66,11 @@ router.post("/v1/requests", uploadWorkflowRequestAttachments, createWorkflowRequ
 router.get("/v1/requests", listWorkflowRequestsHandler);
 router.get("/v1/requests/:workflowRequestId", getWorkflowRequestDetailHandler);
 router.get("/v1/requests/:workflowRequestId/timeline", getWorkflowTimelineHandler);
-router.post("/v1/requests/:requestId/registrar-verification", registrarVerificationHandler);
+router.post(
+  "/v1/requests/:requestId/registrar-verification",
+  uploadWorkflowApprovalSignature,
+  registrarVerificationHandler
+);
 router.post("/v1/requests/:requestId/reject", registrarRejectHandler);
 router.post("/v1/requests/:requestId/cancel", requestCancelHandler);
 router.post("/v1/requests/:requestId/fee-assessments", feeAssessHandler);
@@ -76,7 +79,11 @@ router.get(
   "/v1/approvals/dean/queue",
   listWorkflowQueueHandler(["UNDER_DEAN_APPROVAL"] as WorkflowStatus[])
 );
-router.post("/v1/approvals/dean/:requestId/approve", deanApproveHandler);
+router.post(
+  "/v1/approvals/dean/:requestId/approve",
+  uploadWorkflowApprovalSignature,
+  deanApproveHandler
+);
 router.post("/v1/approvals/dean/:requestId/reject", deanRejectHandler);
 
 router.get(
@@ -85,6 +92,7 @@ router.get(
 );
 router.post(
   "/v1/approvals/college-admin/:requestId/approve",
+  uploadWorkflowApprovalSignature,
   collegeAdminApproveHandler
 );
 router.post(
@@ -97,7 +105,11 @@ router.get(
   listWorkflowQueueHandler(["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"] as WorkflowStatus[])
 );
 router.post("/v1/payments/:requestId/submit", uploadWorkflowPaymentProof, paymentSubmitHandler);
-router.post("/v1/payments/:requestId/confirm", paymentConfirmHandler);
+router.post(
+  "/v1/payments/:requestId/confirm",
+  uploadWorkflowApprovalSignature,
+  paymentConfirmHandler
+);
 
 router.post("/v1/documents/:requestId/prepare", documentPrepareHandler);
 router.post("/v1/documents/:requestId/finalize", documentFinalizeHandler);
@@ -112,8 +124,6 @@ router.get(
   downloadWorkflowRequestClaimStubHandler
 );
 
-router.post("/v1/release/:requestId/dispatch", releaseDispatchHandler);
-router.post("/v1/release/:requestId/email-send", releaseEmailHandler);
 router.post("/v1/release/:requestId/claim", releaseClaimHandler);
 router.post("/v1/release/:requestId/complete", releaseCompleteHandler);
 

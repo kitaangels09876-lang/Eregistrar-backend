@@ -40,7 +40,11 @@ const createUploader = (folder: string) =>
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       if (!allowedMimeTypes.has(file.mimetype)) {
-        cb(new Error("Only JPG, PNG, and PDF files are allowed"));
+        const error = new Error("Only JPG, PNG, and PDF files are allowed") as Error & {
+          statusCode?: number;
+        };
+        error.statusCode = 400;
+        cb(error);
         return;
       }
 
@@ -62,3 +66,7 @@ export const uploadWorkflowClaimFiles = createUploader("claim-files").fields([
   { name: "claimant_id_image", maxCount: 1 },
   { name: "signature_capture", maxCount: 1 },
 ]);
+
+export const uploadWorkflowApprovalSignature = createUploader("approval-signatures").single(
+  "signature_file"
+);
