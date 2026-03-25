@@ -60,7 +60,8 @@ export const createDocument = async (req: Request, res: Response) => {
       description,
       base_price,
       requirements,
-      estimated_processing_days
+      estimated_processing_days,
+      is_free_first_time,
     } = req.body;
 
     const userId = getUserIdFromRequest(req);
@@ -95,7 +96,8 @@ export const createDocument = async (req: Request, res: Response) => {
       description,
       base_price: base_price ?? 0,
       requirements,
-      estimated_processing_days: estimated_processing_days ?? 1
+      estimated_processing_days: estimated_processing_days ?? 1,
+      is_free_first_time: Boolean(is_free_first_time),
     });
 
     await logActivity({
@@ -106,7 +108,8 @@ export const createDocument = async (req: Request, res: Response) => {
       newValue: {
         document_name,
         base_price,
-        estimated_processing_days
+        estimated_processing_days,
+        is_free_first_time: Boolean(is_free_first_time),
       },
       req
     });
@@ -133,6 +136,7 @@ export const updateDocument = async (req: Request, res: Response) => {
       base_price,
       requirements,
       estimated_processing_days,
+      is_free_first_time,
       is_active
     } = req.body;
 
@@ -160,6 +164,7 @@ export const updateDocument = async (req: Request, res: Response) => {
       base_price: document.base_price,
       requirements: document.requirements,
       estimated_processing_days: document.estimated_processing_days,
+      is_free_first_time: document.is_free_first_time,
       is_active: document.is_active
     };
 
@@ -170,6 +175,7 @@ export const updateDocument = async (req: Request, res: Response) => {
       requirements: requirements ?? document.requirements,
       estimated_processing_days:
         estimated_processing_days ?? document.estimated_processing_days,
+      is_free_first_time: is_free_first_time ?? document.is_free_first_time,
       is_active: is_active ?? document.is_active
     });
 
@@ -185,6 +191,7 @@ export const updateDocument = async (req: Request, res: Response) => {
         base_price: document.base_price,
         requirements: document.requirements,
         estimated_processing_days: document.estimated_processing_days,
+        is_free_first_time: document.is_free_first_time,
         is_active: document.is_active
       },
       req

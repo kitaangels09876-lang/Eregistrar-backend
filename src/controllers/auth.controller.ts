@@ -467,7 +467,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
 
       const roles = userRoles.map((r: any) => r.role_name);
-      const permissions = getPermissionsForRoles(roles);
+      const permissions = await getPermissionsForRoles(roles);
       const effectiveAccountType = resolveEffectiveAccountType(
         user.account_type,
         roles
@@ -630,7 +630,7 @@ export const checkAuth = async (req: Request, res: Response) => {
     );
 
     const roles = rolesResult.map((r: any) => r.role_name);
-    const permissions = getPermissionsForRoles(roles);
+    const permissions = await getPermissionsForRoles(roles);
     const effectiveAccountType = resolveEffectiveAccountType(
       user.account_type,
       roles
@@ -811,7 +811,7 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
     );
 
     const roles = roleRows.map((row: any) => row.role_name);
-    const permissions = getPermissionsForRoles(roles);
+    const permissions = await getPermissionsForRoles(roles);
     const effectiveAccountType = resolveEffectiveAccountType(
       user.account_type,
       roles

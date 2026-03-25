@@ -19,6 +19,7 @@ type AuthUser = {
   user_id: number;
   account_type: string;
   roles?: string[];
+  permissions?: string[];
 };
 
 const STAFF_ROLES = [
@@ -30,32 +31,81 @@ const STAFF_ROLES = [
   "treasurer",
 ] as const;
 
+const PORTAL_ROLES = ["student", "alumni"] as const;
+
 const PAYMENT_VISIBLE_STATUSES: WorkflowStatus[] = [
   "AWAITING_PAYMENT",
+  "PAYMENT_SUBMITTED",
   "PAYMENT_CONFIRMED",
-  "FOR_PROCESSING",
+  "UNDER_REGISTRAR_PROCESSING",
 ];
 
+const VIEW_PERMISSION_RULES = {
+  portal: "request.view.own",
+  registrar: "request.view.all",
+  admin: "request.view.all",
+  dean: "approval.dean.view",
+  college_admin: "approval.college_admin.view",
+  accounting: "payment.confirm",
+  treasurer: "payment.confirm",
+} as const;
+
+const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> = {
+  UNDER_REGISTRAR_VERIFICATION: ["request.verify"],
+  UNDER_DEAN_APPROVAL: ["request.verify"],
+  DEAN_APPROVED: ["approval.dean.approve"],
+  UNDER_COLLEGE_ADMIN_REVIEW: ["approval.dean.approve"],
+  COLLEGE_ADMIN_APPROVED: ["approval.college_admin.approve"],
+  FEE_ASSESSED: ["payment.assess"],
+  AWAITING_PAYMENT: ["payment.assess"],
+  PAYMENT_SUBMITTED: ["payment.submit.own"],
+  PAYMENT_CONFIRMED: ["payment.confirm"],
+  UNDER_REGISTRAR_PROCESSING: ["payment.confirm"],
+  DOCUMENT_GENERATION: ["document.prepare"],
+  READY_FOR_RELEASE: ["document.generate"],
+  OUT_FOR_DELIVERY: ["document.release"],
+  RELEASED: ["document.release"],
+  CLAIMED: ["document.claim"],
+  COMPLETED: ["document.release", "document.claim"],
+  CANCELLED: ["request.cancel.own", "request.cancel.any"],
+  REJECTED: [
+    "request.verify",
+    "approval.dean.approve",
+    "approval.college_admin.approve",
+  ],
+};
+
 const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
-  UNDER_REGISTRAR_REVIEW: ["registrar", "admin"],
-  AWAITING_DEAN_APPROVAL: ["registrar", "admin"],
+  UNDER_REGISTRAR_VERIFICATION: ["registrar", "admin"],
+  UNDER_DEAN_APPROVAL: ["registrar", "admin"],
   DEAN_APPROVED: ["dean", "admin"],
-  AWAITING_COLLEGE_ADMIN_REVIEW: ["dean", "admin"],
+  UNDER_COLLEGE_ADMIN_REVIEW: ["dean", "admin"],
   COLLEGE_ADMIN_APPROVED: ["college_admin", "admin"],
   FEE_ASSESSED: ["registrar", "admin"],
   AWAITING_PAYMENT: ["registrar", "admin"],
+  PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
   PAYMENT_CONFIRMED: ["treasurer", "accounting", "admin"],
-  FOR_PROCESSING: ["treasurer", "accounting", "admin"],
-  DOCUMENT_PREPARING: ["registrar", "admin"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "accounting", "admin"],
+  DOCUMENT_GENERATION: ["registrar", "admin"],
   READY_FOR_RELEASE: ["registrar", "admin"],
   OUT_FOR_DELIVERY: ["registrar", "admin"],
   RELEASED: ["registrar", "admin"],
   CLAIMED: ["registrar", "admin"],
   COMPLETED: ["registrar", "admin"],
+  CANCELLED: ["student", "alumni", "registrar", "admin"],
+  REJECTED: ["registrar", "dean", "college_admin", "admin"],
 };
 
 const normalizeRoles = (roles: string[] = []) =>
   roles.map((role) => role.trim().toLowerCase()).filter(Boolean);
+
+const canPerformWorkflowRule = (
+  user: AuthUser,
+  roles: string[],
+  rule: { roles: string[]; permissions: string[] }
+) =>
+  roles.some((role) => rule.roles.includes(role)) &&
+  hasAnyPermission(user, rule.permissions);
 
 const parseJsonField = <T>(value: any, fallback: T): T => {
   if (!value) {
@@ -237,6 +287,52 @@ const insertFeeAssessmentRecord = async ({
   );
 };
 
+const insertPaymentSubmissionRecord = async ({
+  workflowRequestId,
+  submittedByUserId,
+  payment,
+}: {
+  workflowRequestId: number;
+  submittedByUserId: number;
+  payment: Record<string, any>;
+}) => {
+  await sequelize.query(
+    `
+    INSERT INTO workflow_payment_submissions (
+      workflow_request_id,
+      payment_reference_number,
+      payment_channel,
+      proof_file_name,
+      proof_file_path,
+      submission_notes,
+      submitted_by_user_id,
+      submitted_at
+    ) VALUES (
+      :workflowRequestId,
+      :paymentReferenceNumber,
+      :paymentChannel,
+      :proofFileName,
+      :proofFilePath,
+      :submissionNotes,
+      :submittedByUserId,
+      NOW()
+    )
+    `,
+    {
+      replacements: {
+        workflowRequestId,
+        paymentReferenceNumber: payment.payment_reference_number || null,
+        paymentChannel: payment.payment_channel || null,
+        proofFileName: payment.proof_file_name || null,
+        proofFilePath: payment.proof_file_path || null,
+        submissionNotes: payment.submission_notes || null,
+        submittedByUserId,
+      },
+      type: QueryTypes.INSERT,
+    }
+  );
+};
+
 const upsertReleaseRecord = async ({
   workflowRequestId,
   releaseSnapshot,
@@ -289,6 +385,13 @@ const upsertReleaseRecord = async ({
         authorized_representative_name = :authorizedRepresentativeName,
         authorized_representative_id_type = :authorizedRepresentativeIdType,
         authorized_representative_id_number = :authorizedRepresentativeIdNumber,
+        claimant_type = :claimantType,
+        claimant_relationship = :claimantRelationship,
+        claimant_id_type = :claimantIdType,
+        claimant_id_number = :claimantIdNumber,
+        authorization_letter_file_path = :authorizationLetterFilePath,
+        claimant_id_file_path = :claimantIdFilePath,
+        signature_file_path = :signatureFilePath,
         courier_name = :courierName,
         tracking_number = :trackingNumber,
         dispatch_at = :dispatchAt,
@@ -312,6 +415,14 @@ const upsertReleaseRecord = async ({
             releaseSnapshot.authorized_representative_id_type || null,
           authorizedRepresentativeIdNumber:
             releaseSnapshot.authorized_representative_id_number || null,
+          claimantType: releaseSnapshot.claimant_type || null,
+          claimantRelationship: releaseSnapshot.claimant_relationship || null,
+          claimantIdType: releaseSnapshot.claimant_id_type || null,
+          claimantIdNumber: releaseSnapshot.claimant_id_number || null,
+          authorizationLetterFilePath:
+            releaseSnapshot.authorization_letter_file_path || null,
+          claimantIdFilePath: releaseSnapshot.claimant_id_file_path || null,
+          signatureFilePath: releaseSnapshot.signature_file_path || null,
           courierName: releaseSnapshot.courier_name || null,
           trackingNumber: releaseSnapshot.tracking_number || null,
           dispatchAt: releaseSnapshot.dispatched_at || null,
@@ -339,6 +450,13 @@ const upsertReleaseRecord = async ({
       authorized_representative_name,
       authorized_representative_id_type,
       authorized_representative_id_number,
+      claimant_type,
+      claimant_relationship,
+      claimant_id_type,
+      claimant_id_number,
+      authorization_letter_file_path,
+      claimant_id_file_path,
+      signature_file_path,
       courier_name,
       tracking_number,
       dispatch_at,
@@ -356,6 +474,13 @@ const upsertReleaseRecord = async ({
       :authorizedRepresentativeName,
       :authorizedRepresentativeIdType,
       :authorizedRepresentativeIdNumber,
+      :claimantType,
+      :claimantRelationship,
+      :claimantIdType,
+      :claimantIdNumber,
+      :authorizationLetterFilePath,
+      :claimantIdFilePath,
+      :signatureFilePath,
       :courierName,
       :trackingNumber,
       :dispatchAt,
@@ -379,6 +504,14 @@ const upsertReleaseRecord = async ({
           releaseSnapshot.authorized_representative_id_type || null,
         authorizedRepresentativeIdNumber:
           releaseSnapshot.authorized_representative_id_number || null,
+        claimantType: releaseSnapshot.claimant_type || null,
+        claimantRelationship: releaseSnapshot.claimant_relationship || null,
+        claimantIdType: releaseSnapshot.claimant_id_type || null,
+        claimantIdNumber: releaseSnapshot.claimant_id_number || null,
+        authorizationLetterFilePath:
+          releaseSnapshot.authorization_letter_file_path || null,
+        claimantIdFilePath: releaseSnapshot.claimant_id_file_path || null,
+        signatureFilePath: releaseSnapshot.signature_file_path || null,
         courierName: releaseSnapshot.courier_name || null,
         trackingNumber: releaseSnapshot.tracking_number || null,
         dispatchAt: releaseSnapshot.dispatched_at || null,
@@ -442,52 +575,124 @@ const insertReleaseLog = async ({
 
 const WORKFLOW_ACTION_RULES: Record<
   string,
-  { roles: string[]; currentStatuses: WorkflowStatus[] }
+  { roles: string[]; permissions: string[]; currentStatuses: WorkflowStatus[] }
 > = {
   registrar_verification: {
     roles: ["registrar", "admin"],
-    currentStatuses: ["SUBMITTED", "UNDER_REGISTRAR_REVIEW"],
+    permissions: ["request.verify"],
+    currentStatuses: ["SUBMITTED", "UNDER_REGISTRAR_VERIFICATION"],
   },
   dean_approve: {
     roles: ["dean", "admin"],
-    currentStatuses: ["AWAITING_DEAN_APPROVAL"],
+    permissions: ["approval.dean.approve"],
+    currentStatuses: ["UNDER_DEAN_APPROVAL"],
   },
   college_admin_approve: {
     roles: ["college_admin", "admin"],
-    currentStatuses: ["AWAITING_COLLEGE_ADMIN_REVIEW"],
+    permissions: ["approval.college_admin.approve"],
+    currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
   },
   fee_assess: {
     roles: ["registrar", "admin"],
+    permissions: ["payment.assess"],
     currentStatuses: ["COLLEGE_ADMIN_APPROVED"],
+  },
+  payment_submit: {
+    roles: ["student", "alumni", "admin"],
+    permissions: ["payment.submit.own"],
+    currentStatuses: ["AWAITING_PAYMENT"],
   },
   payment_confirm: {
     roles: ["treasurer", "accounting", "admin"],
-    currentStatuses: ["AWAITING_PAYMENT"],
+    permissions: ["payment.confirm"],
+    currentStatuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
   },
   document_prepare: {
     roles: ["registrar", "admin"],
-    currentStatuses: ["FOR_PROCESSING"],
+    permissions: ["document.prepare"],
+    currentStatuses: ["UNDER_REGISTRAR_PROCESSING"],
   },
   document_finalize: {
     roles: ["registrar", "admin"],
-    currentStatuses: ["DOCUMENT_PREPARING"],
+    permissions: ["document.generate"],
+    currentStatuses: ["DOCUMENT_GENERATION"],
   },
   release_dispatch: {
     roles: ["registrar", "admin"],
+    permissions: ["document.release"],
     currentStatuses: ["READY_FOR_RELEASE"],
   },
   release_email: {
     roles: ["registrar", "admin"],
+    permissions: ["document.release"],
     currentStatuses: ["READY_FOR_RELEASE"],
   },
   release_claim: {
     roles: ["registrar", "admin"],
+    permissions: ["document.claim"],
     currentStatuses: ["READY_FOR_RELEASE"],
   },
   release_complete: {
     roles: ["registrar", "admin"],
+    permissions: ["document.release", "document.claim"],
     currentStatuses: ["OUT_FOR_DELIVERY", "RELEASED", "CLAIMED"],
   },
+  request_cancel: {
+    roles: ["student", "alumni", "registrar", "admin"],
+    permissions: ["request.cancel.own", "request.cancel.any"],
+    currentStatuses: [
+      "SUBMITTED",
+      "UNDER_REGISTRAR_VERIFICATION",
+      "UNDER_DEAN_APPROVAL",
+      "DEAN_APPROVED",
+      "UNDER_COLLEGE_ADMIN_REVIEW",
+      "COLLEGE_ADMIN_APPROVED",
+      "FEE_ASSESSED",
+      "AWAITING_PAYMENT",
+      "PAYMENT_SUBMITTED",
+      "READY_FOR_RELEASE",
+    ],
+  },
+  registrar_reject: {
+    roles: ["registrar", "admin"],
+    permissions: ["request.verify"],
+    currentStatuses: ["UNDER_REGISTRAR_VERIFICATION", "UNDER_REGISTRAR_PROCESSING", "DOCUMENT_GENERATION"],
+  },
+  dean_reject: {
+    roles: ["dean", "admin"],
+    permissions: ["approval.dean.approve"],
+    currentStatuses: ["UNDER_DEAN_APPROVAL"],
+  },
+  college_admin_reject: {
+    roles: ["college_admin", "admin"],
+    permissions: ["approval.college_admin.approve"],
+    currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
+  },
+};
+
+const ensureColumnExists = async (
+  tableName: string,
+  columnName: string,
+  definition: string
+) => {
+  const columns: any[] = await sequelize.query(
+    `
+    SHOW COLUMNS FROM ${tableName} LIKE :columnName
+    `,
+    {
+      replacements: { columnName },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (columns.length === 0) {
+    await sequelize.query(
+      `
+      ALTER TABLE ${tableName}
+      ADD COLUMN ${columnName} ${definition}
+      `
+    );
+  }
 };
 
 const ensureWorkflowSchema = async () => {
@@ -597,6 +802,24 @@ const ensureWorkflowSchema = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (workflow_request_id) REFERENCES workflow_requests(workflow_request_id) ON DELETE CASCADE,
       FOREIGN KEY (document_type_id) REFERENCES document_types(document_type_id)
+    ) ENGINE=InnoDB;
+  `);
+
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS workflow_request_attachments (
+      workflow_request_attachment_id INT AUTO_INCREMENT PRIMARY KEY,
+      workflow_request_id INT NOT NULL,
+      attachment_label VARCHAR(255) NULL,
+      original_file_name VARCHAR(255) NOT NULL,
+      stored_file_name VARCHAR(255) NOT NULL,
+      file_path VARCHAR(500) NOT NULL,
+      mime_type VARCHAR(120) NULL,
+      file_size BIGINT NULL,
+      uploaded_by_user_id INT NOT NULL,
+      uploaded_at DATETIME NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (workflow_request_id) REFERENCES workflow_requests(workflow_request_id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by_user_id) REFERENCES users(user_id)
     ) ENGINE=InnoDB;
   `);
 
@@ -732,6 +955,138 @@ const ensureWorkflowSchema = async () => {
     ) ENGINE=InnoDB;
   `);
 
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS workflow_payment_submissions (
+      workflow_payment_submission_id INT AUTO_INCREMENT PRIMARY KEY,
+      workflow_request_id INT NOT NULL,
+      payment_reference_number VARCHAR(120) NULL,
+      payment_channel VARCHAR(120) NULL,
+      proof_file_name VARCHAR(255) NULL,
+      proof_file_path VARCHAR(500) NULL,
+      submission_notes TEXT NULL,
+      submitted_by_user_id INT NOT NULL,
+      submitted_at DATETIME NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (workflow_request_id) REFERENCES workflow_requests(workflow_request_id) ON DELETE CASCADE,
+      FOREIGN KEY (submitted_by_user_id) REFERENCES users(user_id)
+    ) ENGINE=InnoDB;
+  `);
+
+  await ensureColumnExists("workflow_requests", "rejection_reason", "TEXT NULL");
+  await ensureColumnExists("workflow_requests", "rejected_by_role", "VARCHAR(100) NULL");
+  await ensureColumnExists("workflow_requests", "rejected_at", "DATETIME NULL");
+  await ensureColumnExists("workflow_requests", "cancellation_reason", "TEXT NULL");
+  await ensureColumnExists("workflow_requests", "cancelled_by_role", "VARCHAR(100) NULL");
+  await ensureColumnExists("workflow_requests", "cancelled_at", "DATETIME NULL");
+
+  await ensureColumnExists(
+    "workflow_release_records",
+    "claimant_type",
+    "VARCHAR(50) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "claimant_relationship",
+    "VARCHAR(100) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "claimant_id_type",
+    "VARCHAR(100) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "claimant_id_number",
+    "VARCHAR(100) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "authorization_letter_file_path",
+    "VARCHAR(500) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "claimant_id_file_path",
+    "VARCHAR(500) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_release_records",
+    "signature_file_path",
+    "VARCHAR(500) NULL"
+  );
+
+  await sequelize.query(`
+    UPDATE workflow_requests
+    SET current_status = CASE current_status
+      WHEN 'UNDER_REGISTRAR_REVIEW' THEN 'UNDER_REGISTRAR_VERIFICATION'
+      WHEN 'AWAITING_DEAN_APPROVAL' THEN 'UNDER_DEAN_APPROVAL'
+      WHEN 'AWAITING_COLLEGE_ADMIN_REVIEW' THEN 'UNDER_COLLEGE_ADMIN_REVIEW'
+      WHEN 'FOR_PROCESSING' THEN 'UNDER_REGISTRAR_PROCESSING'
+      WHEN 'DOCUMENT_PREPARING' THEN 'DOCUMENT_GENERATION'
+      ELSE current_status
+    END
+    WHERE current_status IN (
+      'UNDER_REGISTRAR_REVIEW',
+      'AWAITING_DEAN_APPROVAL',
+      'AWAITING_COLLEGE_ADMIN_REVIEW',
+      'FOR_PROCESSING',
+      'DOCUMENT_PREPARING'
+    )
+  `);
+
+  await sequelize.query(`
+    UPDATE workflow_request_actions
+    SET from_status = CASE from_status
+      WHEN 'UNDER_REGISTRAR_REVIEW' THEN 'UNDER_REGISTRAR_VERIFICATION'
+      WHEN 'AWAITING_DEAN_APPROVAL' THEN 'UNDER_DEAN_APPROVAL'
+      WHEN 'AWAITING_COLLEGE_ADMIN_REVIEW' THEN 'UNDER_COLLEGE_ADMIN_REVIEW'
+      WHEN 'FOR_PROCESSING' THEN 'UNDER_REGISTRAR_PROCESSING'
+      WHEN 'DOCUMENT_PREPARING' THEN 'DOCUMENT_GENERATION'
+      ELSE from_status
+    END,
+    to_status = CASE to_status
+      WHEN 'UNDER_REGISTRAR_REVIEW' THEN 'UNDER_REGISTRAR_VERIFICATION'
+      WHEN 'AWAITING_DEAN_APPROVAL' THEN 'UNDER_DEAN_APPROVAL'
+      WHEN 'AWAITING_COLLEGE_ADMIN_REVIEW' THEN 'UNDER_COLLEGE_ADMIN_REVIEW'
+      WHEN 'FOR_PROCESSING' THEN 'UNDER_REGISTRAR_PROCESSING'
+      WHEN 'DOCUMENT_PREPARING' THEN 'DOCUMENT_GENERATION'
+      ELSE to_status
+    END
+    WHERE from_status IN (
+      'UNDER_REGISTRAR_REVIEW',
+      'AWAITING_DEAN_APPROVAL',
+      'AWAITING_COLLEGE_ADMIN_REVIEW',
+      'FOR_PROCESSING',
+      'DOCUMENT_PREPARING'
+    )
+    OR to_status IN (
+      'UNDER_REGISTRAR_REVIEW',
+      'AWAITING_DEAN_APPROVAL',
+      'AWAITING_COLLEGE_ADMIN_REVIEW',
+      'FOR_PROCESSING',
+      'DOCUMENT_PREPARING'
+    )
+  `);
+
+  await sequelize.query(`
+    UPDATE workflow_generated_documents
+    SET source_status = CASE source_status
+      WHEN 'UNDER_REGISTRAR_REVIEW' THEN 'UNDER_REGISTRAR_VERIFICATION'
+      WHEN 'AWAITING_DEAN_APPROVAL' THEN 'UNDER_DEAN_APPROVAL'
+      WHEN 'AWAITING_COLLEGE_ADMIN_REVIEW' THEN 'UNDER_COLLEGE_ADMIN_REVIEW'
+      WHEN 'FOR_PROCESSING' THEN 'UNDER_REGISTRAR_PROCESSING'
+      WHEN 'DOCUMENT_PREPARING' THEN 'DOCUMENT_GENERATION'
+      ELSE source_status
+    END
+    WHERE source_status IN (
+      'UNDER_REGISTRAR_REVIEW',
+      'AWAITING_DEAN_APPROVAL',
+      'AWAITING_COLLEGE_ADMIN_REVIEW',
+      'FOR_PROCESSING',
+      'DOCUMENT_PREPARING'
+    )
+  `);
+
   schemaReady = true;
 };
 
@@ -749,16 +1104,101 @@ const getPrimaryRole = (user: AuthUser) => {
   return STAFF_ROLES.find((role) => roles.includes(role)) || roles[0] || "student";
 };
 
+const getUserPermissions = (user: AuthUser) => {
+  const tokenPermissions = Array.isArray(user.permissions)
+    ? user.permissions.map((permission) => String(permission).trim()).filter(Boolean)
+    : [];
+
+  if (tokenPermissions.length > 0) {
+    return Array.from(new Set(tokenPermissions)).sort();
+  }
+
+  return getPermissionsForRolesSync(getRoleNames(user));
+};
+
+const hasAnyPermission = (user: AuthUser, requiredPermissions: string[] = []) => {
+  if (requiredPermissions.length === 0) {
+    return true;
+  }
+
+  const permissions = getUserPermissions(user);
+  return requiredPermissions.some((permission) => permissions.includes(permission));
+};
+
+const buildDocumentAccessPolicy = (detail: any, user?: AuthUser) => {
+  const roles = user ? getRoleNames(user) : [];
+  const isStaff =
+    roles.includes("admin") ||
+    roles.includes("registrar") ||
+    roles.includes("dean") ||
+    roles.includes("college_admin") ||
+    roles.includes("accounting") ||
+    roles.includes("treasurer");
+
+  if (isStaff) {
+    return {
+      can_view_generated_document: true,
+      can_download_generated_document: true,
+      can_view_claim_stub: true,
+      can_download_claim_stub: true,
+      generated_document_reason: "staff_access",
+      claim_stub_reason: "staff_access",
+    };
+  }
+
+  const currentStatus = detail.current_status as WorkflowStatus;
+  const releaseMethod = String(
+    detail.release_snapshot?.release_method || detail.delivery_method || ""
+  ).toLowerCase();
+
+  const isPickup = releaseMethod === "pickup";
+  const isEmail = releaseMethod === "email";
+  const isCourier = releaseMethod === "courier";
+  const releasedStatuses = ["RELEASED", "CLAIMED", "COMPLETED"];
+
+  return {
+    can_view_generated_document:
+      (isEmail && releasedStatuses.includes(currentStatus)) ||
+      (isCourier && currentStatus === "COMPLETED"),
+    can_download_generated_document:
+      (isEmail && releasedStatuses.includes(currentStatus)) ||
+      (isCourier && currentStatus === "COMPLETED"),
+    can_view_claim_stub:
+      isPickup &&
+      ["READY_FOR_RELEASE", "CLAIMED", "COMPLETED"].includes(currentStatus) &&
+      Boolean(detail.latest_claim_stub),
+    can_download_claim_stub:
+      isPickup &&
+      ["READY_FOR_RELEASE", "CLAIMED", "COMPLETED"].includes(currentStatus) &&
+      Boolean(detail.latest_claim_stub),
+    generated_document_reason: isPickup
+      ? "pickup_release_blocks_student_download"
+      : isEmail
+      ? "available_after_release"
+      : "available_after_delivery_completion",
+    claim_stub_reason: isPickup ? "pickup_claim_required" : "claim_stub_not_applicable",
+  };
+};
+
 const assertCanViewWorkflowRequest = (
   detail: any,
   user: AuthUser,
   roles: string[]
 ) => {
   if (roles.includes("admin") || roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
+      throw new Error("Missing permission to view workflow requests");
+    }
     return;
   }
 
-  if (roles.includes("student") || user.account_type === "student") {
+  if (
+    roles.some((role) => PORTAL_ROLES.includes(role as (typeof PORTAL_ROLES)[number])) ||
+    PORTAL_ROLES.includes(String(user.account_type || "").toLowerCase() as any)
+  ) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.portal])) {
+      throw new Error("Missing permission to view own workflow requests");
+    }
     if (detail.student_user_id !== user.user_id) {
       throw new Error("You do not have access to this workflow request");
     }
@@ -766,6 +1206,9 @@ const assertCanViewWorkflowRequest = (
   }
 
   if (roles.includes("dean")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
+      throw new Error("Missing permission to view dean workflow requests");
+    }
     if (detail.dean_user_id !== user.user_id) {
       throw new Error("You do not have access to this dean workflow request");
     }
@@ -773,6 +1216,9 @@ const assertCanViewWorkflowRequest = (
   }
 
   if (roles.includes("college_admin")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.college_admin])) {
+      throw new Error("Missing permission to view college workflow requests");
+    }
     if (detail.college_admin_user_id !== user.user_id) {
       throw new Error("You do not have access to this college workflow request");
     }
@@ -780,6 +1226,14 @@ const assertCanViewWorkflowRequest = (
   }
 
   if (roles.includes("accounting") || roles.includes("treasurer")) {
+    if (
+      !hasAnyPermission(user, [
+        VIEW_PERMISSION_RULES.accounting,
+        VIEW_PERMISSION_RULES.treasurer,
+      ])
+    ) {
+      throw new Error("Missing permission to view payment workflow requests");
+    }
     if (!PAYMENT_VISIBLE_STATUSES.includes(detail.current_status as WorkflowStatus)) {
       throw new Error("You do not have access to this payment workflow request");
     }
@@ -798,11 +1252,58 @@ const getRequestReference = async () => {
   return `REQ-${new Date().getFullYear()}-${String(result.nextNumber).padStart(6, "0")}`;
 };
 
-const assertCanAdvance = (roles: string[], targetStatus: WorkflowStatus) => {
+const hasCompletedDocumentHistory = async (
+  studentId: number,
+  documentTypeId: number
+) => {
+  const [workflowHistory]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM workflow_requests wr
+    JOIN workflow_request_items wri ON wri.workflow_request_id = wr.workflow_request_id
+    WHERE wr.student_id = :studentId
+      AND wri.document_type_id = :documentTypeId
+      AND wr.current_status = 'COMPLETED'
+    LIMIT 1
+    `,
+    {
+      replacements: { studentId, documentTypeId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (workflowHistory) {
+    return true;
+  }
+
+  const [legacyHistory]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM document_requests
+    WHERE student_id = :studentId
+      AND document_type_id = :documentTypeId
+      AND request_status = 'completed'
+    LIMIT 1
+    `,
+    {
+      replacements: { studentId, documentTypeId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return Boolean(legacyHistory);
+};
+
+const assertCanAdvance = (user: AuthUser, roles: string[], targetStatus: WorkflowStatus) => {
   const allowedRoles = TARGET_STATUS_ROLE_RULES[targetStatus] || [];
+  const allowedPermissions = TARGET_STATUS_PERMISSION_RULES[targetStatus] || [];
 
   if (allowedRoles.length > 0 && !roles.some((role) => allowedRoles.includes(role))) {
     throw new Error(`Only ${allowedRoles.join(", ")} can move a request to ${targetStatus}`);
+  }
+
+  if (!hasAnyPermission(user, allowedPermissions)) {
+    throw new Error(`Missing permission to move a request to ${targetStatus}`);
   }
 };
 
@@ -974,6 +1475,54 @@ const getRequestDetailInternal = async (workflowRequestId: number) => {
     }
   );
 
+  const paymentSubmissions: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_payment_submissions
+    WHERE workflow_request_id = :workflowRequestId
+    ORDER BY submitted_at DESC, workflow_payment_submission_id DESC
+    `,
+    {
+      replacements: { workflowRequestId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  const releaseLogs: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_release_claim_logs
+    WHERE workflow_request_id = :workflowRequestId
+    ORDER BY acted_at ASC, workflow_release_claim_log_id ASC
+    `,
+    {
+      replacements: { workflowRequestId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  const attachments: any[] = await sequelize.query(
+    `
+    SELECT
+      workflow_request_attachment_id,
+      attachment_label,
+      original_file_name,
+      stored_file_name,
+      file_path,
+      mime_type,
+      file_size,
+      uploaded_by_user_id,
+      uploaded_at
+    FROM workflow_request_attachments
+    WHERE workflow_request_id = :workflowRequestId
+    ORDER BY uploaded_at ASC, workflow_request_attachment_id ASC
+    `,
+    {
+      replacements: { workflowRequestId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
   return {
     ...request,
     form_snapshot: parseJsonField(request.form_snapshot_json, {}),
@@ -988,8 +1537,25 @@ const getRequestDetailInternal = async (workflowRequestId: number) => {
       ...action,
       payload_json: parseJsonField(action.payload_json, {}),
     })),
+    payment_submissions: paymentSubmissions,
+    attachments,
+    release_logs: releaseLogs.map((log) => ({
+      ...log,
+      metadata_json: parseJsonField(log.metadata_json, {}),
+    })),
     latest_generated_document: document || null,
-    latest_claim_stub: claimStub || null,
+    latest_claim_stub: claimStub
+      ? {
+          workflow_claim_stub_id: claimStub.workflow_claim_stub_id,
+          claim_stub_number: claimStub.claim_stub_number,
+          claim_stub_status: claimStub.claim_stub_status,
+          file_name: claimStub.file_name,
+          file_path: claimStub.file_path,
+          generated_at: claimStub.generated_at,
+          used_at: claimStub.used_at,
+          voided_at: claimStub.voided_at,
+        }
+      : null,
   };
 };
 
@@ -1099,6 +1665,10 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
 
   const claimStubNumber = await getClaimStubNumber();
   const lookupToken = crypto.randomBytes(24).toString("hex");
+  const lookupTokenHash = crypto.createHash("sha256").update(lookupToken).digest("hex");
+  const verificationUrl = `${
+    process.env.FRONTEND_URL || "http://localhost:3000"
+  }/admin/workflow/claim-verification?token=${lookupToken}`;
   const generated = await generateClaimStubPdf({
     request_reference: detail.request_reference,
     claim_stub_number: claimStubNumber,
@@ -1108,6 +1678,8 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
     release_snapshot: detail.release_snapshot,
     items: detail.items,
     purpose: detail.purpose,
+    lookup_token: lookupToken,
+    verification_url: verificationUrl,
   });
 
   const [insertResult]: any = await sequelize.query(
@@ -1134,7 +1706,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
       replacements: {
         workflowRequestId,
         claimStubNumber,
-        lookupTokenHash: lookupToken,
+        lookupTokenHash,
         fileName: generated.fileName,
         filePath: generated.relativePath,
       },
@@ -1149,6 +1721,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
     newValue: {
       claim_stub_number: claimStubNumber,
       file_path: generated.relativePath,
+      verification_url: verificationUrl,
     },
   });
 
@@ -1206,12 +1779,40 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   await ensureWorkflowSchema();
 
   const roles = getRoleNames(user);
-  if (!roles.includes("student") && user.account_type !== "student") {
+  const normalizedAccountType = String(user.account_type || "").toLowerCase();
+  const isPortalUser =
+    roles.some((role) => PORTAL_ROLES.includes(role as (typeof PORTAL_ROLES)[number])) ||
+    PORTAL_ROLES.includes(normalizedAccountType as any);
+
+  if (!isPortalUser) {
     throw new Error("Only students or alumni can submit workflow requests");
+  }
+
+  if (!hasAnyPermission(user, ["request.create"])) {
+    throw new Error("Missing permission to create workflow requests");
   }
 
   if (!Array.isArray(payload.requested_document_ids) || payload.requested_document_ids.length === 0) {
     throw new Error("At least one requested document is required");
+  }
+
+  const requiredFieldChecks: Array<[string, string | null | undefined]> = [
+    ["civil_status", payload.civil_status],
+    ["gender", payload.gender],
+    ["contact_number", payload.contact_number],
+    ["address_line", payload.address_line],
+    ["academic_year_label", payload.academic_year_label],
+    ["purpose", payload.purpose],
+  ];
+
+  for (const [field, value] of requiredFieldChecks) {
+    if (!String(value || "").trim()) {
+      throw new Error(`Field ${field} is required`);
+    }
+  }
+
+  if (!["pickup", "email", "courier"].includes(String(payload.delivery_method || "").toLowerCase())) {
+    throw new Error("Invalid delivery method");
   }
 
   const [student]: any[] = await sequelize.query(
@@ -1242,7 +1843,7 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
 
   const documents: any[] = await sequelize.query(
     `
-    SELECT document_type_id, document_name, base_price
+    SELECT document_type_id, document_name, base_price, is_free_first_time, requirements
     FROM document_types
     WHERE document_type_id IN (:ids) AND is_active = 1
     `,
@@ -1254,6 +1855,12 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
 
   if (documents.length !== payload.requested_document_ids.length) {
     throw new Error("One or more selected documents are invalid");
+  }
+
+  const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+  const requiredDocuments = documents.filter((document) => String(document.requirements || "").trim());
+  if (requiredDocuments.length > 0 && attachments.length === 0) {
+    throw new Error("Attachments are required for the selected document request");
   }
 
   const academicScope = await resolveAcademicScope(student.course_id || null);
@@ -1351,6 +1958,11 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     const workflowRequestId = Number(requestInsert);
 
     for (const document of documents) {
+      const isFirstTimeFreeEligible =
+        Boolean(document.is_free_first_time) &&
+        !(await hasCompletedDocumentHistory(student.student_id, document.document_type_id));
+      const finalPrice = isFirstTimeFreeEligible ? 0 : Number(document.base_price || 0);
+
       await sequelize.query(
         `
         INSERT INTO workflow_request_items (
@@ -1375,7 +1987,49 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
             documentTypeId: document.document_type_id,
             documentName: document.document_name,
             basePrice: Number(document.base_price || 0),
-            finalPrice: Number(document.base_price || 0),
+            finalPrice,
+          },
+          transaction,
+          type: QueryTypes.INSERT,
+        }
+      );
+    }
+
+    for (const attachment of attachments) {
+      await sequelize.query(
+        `
+        INSERT INTO workflow_request_attachments (
+          workflow_request_id,
+          attachment_label,
+          original_file_name,
+          stored_file_name,
+          file_path,
+          mime_type,
+          file_size,
+          uploaded_by_user_id,
+          uploaded_at
+        ) VALUES (
+          :workflowRequestId,
+          :attachmentLabel,
+          :originalFileName,
+          :storedFileName,
+          :filePath,
+          :mimeType,
+          :fileSize,
+          :uploadedByUserId,
+          NOW()
+        )
+        `,
+        {
+          replacements: {
+            workflowRequestId,
+            attachmentLabel: attachment.attachment_label || "Request attachment",
+            originalFileName: attachment.original_file_name,
+            storedFileName: attachment.stored_file_name,
+            filePath: attachment.file_path,
+            mimeType: attachment.mime_type || null,
+            fileSize: attachment.file_size || null,
+            uploadedByUserId: user.user_id,
           },
           transaction,
           type: QueryTypes.INSERT,
@@ -1413,6 +2067,7 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
           payload: JSON.stringify({
             request_reference: requestReference,
             requested_document_ids: payload.requested_document_ids,
+            attachment_count: attachments.length,
           }),
           actedByUserId: user.user_id,
         },
@@ -1444,8 +2099,21 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
       request_reference: requestReference,
       current_status: "SUBMITTED",
       purpose: payload.purpose,
+      attachment_count: attachments.length,
     },
   });
+
+  if (attachments.length > 0) {
+    await createWorkflowAuditLog({
+      userId: user.user_id,
+      action: "WORKFLOW_REQUIREMENTS_UPLOADED",
+      workflowRequestId: created.workflow_request_id,
+      newValue: {
+        attachment_count: attachments.length,
+        file_names: attachments.map((attachment) => attachment.original_file_name),
+      },
+    });
+  }
 
   if (academicScope.dean_user_id) {
     await createWorkflowNotification({
@@ -1456,30 +2124,92 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     });
   }
 
+  await createWorkflowNotification({
+    userId: user.user_id,
+    title: "Request submitted",
+    message: `Your request ${requestReference} has been submitted successfully.`,
+    status: "SUBMITTED",
+  });
+
   return getRequestDetailInternal(created.workflow_request_id);
 };
 
-export const listWorkflowRequests = async (user: AuthUser) => {
+export const listWorkflowRequests = async (
+  user: AuthUser,
+  filters?: {
+    status?: string;
+    document_type_id?: string | number;
+    from_date?: string;
+    to_date?: string;
+  }
+) => {
   await ensureWorkflowSchema();
 
   const roles = getRoleNames(user);
   const whereClauses: string[] = [];
   const replacements: Record<string, any> = {};
 
-  if (roles.includes("student") || user.account_type === "student") {
+  if (
+    roles.some((role) => PORTAL_ROLES.includes(role as (typeof PORTAL_ROLES)[number])) ||
+    PORTAL_ROLES.includes(String(user.account_type || "").toLowerCase() as any)
+  ) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.portal])) {
+      throw new Error("Missing permission to list own workflow requests");
+    }
     whereClauses.push("wr.student_user_id = :userId");
     replacements.userId = user.user_id;
   } else if (roles.includes("admin") || roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
+      throw new Error("Missing permission to list workflow requests");
+    }
     // Operational staff can see the full queue.
   } else if (roles.includes("dean")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
+      throw new Error("Missing permission to list dean workflow queue");
+    }
     whereClauses.push("wr.dean_user_id = :userId");
     replacements.userId = user.user_id;
   } else if (roles.includes("college_admin")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.college_admin])) {
+      throw new Error("Missing permission to list college workflow queue");
+    }
     whereClauses.push("wr.college_admin_user_id = :userId");
     replacements.userId = user.user_id;
   } else if (roles.includes("accounting") || roles.includes("treasurer")) {
+    if (
+      !hasAnyPermission(user, [
+        VIEW_PERMISSION_RULES.accounting,
+        VIEW_PERMISSION_RULES.treasurer,
+      ])
+    ) {
+      throw new Error("Missing permission to list payment workflow queue");
+    }
     whereClauses.push("wr.current_status IN (:paymentVisibleStatuses)");
     replacements.paymentVisibleStatuses = PAYMENT_VISIBLE_STATUSES;
+  } else {
+    throw new Error("You do not have access to list workflow requests");
+  }
+
+  if (filters?.status) {
+    whereClauses.push("wr.current_status = :statusFilter");
+    replacements.statusFilter = filters.status;
+  }
+
+  if (filters?.from_date) {
+    whereClauses.push("DATE(wr.submitted_at) >= :fromDateFilter");
+    replacements.fromDateFilter = filters.from_date;
+  }
+
+  if (filters?.to_date) {
+    whereClauses.push("DATE(wr.submitted_at) <= :toDateFilter");
+    replacements.toDateFilter = filters.to_date;
+  }
+
+  if (filters?.document_type_id) {
+    whereClauses.push(
+      "EXISTS (SELECT 1 FROM workflow_request_items wri_filter WHERE wri_filter.workflow_request_id = wr.workflow_request_id AND wri_filter.document_type_id = :documentTypeFilter)"
+    );
+    replacements.documentTypeFilter = Number(filters.document_type_id);
   }
 
   const rows: any[] = await sequelize.query(
@@ -1490,6 +2220,12 @@ export const listWorkflowRequests = async (user: AuthUser) => {
       wr.current_status,
       wr.purpose,
       wr.delivery_method,
+      wr.rejection_reason,
+      wr.rejected_by_role,
+      wr.rejected_at,
+      wr.cancellation_reason,
+      wr.cancelled_by_role,
+      wr.cancelled_at,
       wr.submitted_at,
       wr.updated_at,
       wr.student_user_id,
@@ -1519,18 +2255,7 @@ export const listWorkflowRequests = async (user: AuthUser) => {
         WHERE wcs.workflow_request_id = wr.workflow_request_id
         ORDER BY generated_at DESC, workflow_claim_stub_id DESC
         LIMIT 1
-      ) AS latest_claim_stub_number,
-      (
-        SELECT JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'document_name', document_name,
-            'quantity', quantity,
-            'final_price', final_price
-          )
-        )
-        FROM workflow_request_items wri
-        WHERE wri.workflow_request_id = wr.workflow_request_id
-      ) AS items_json
+      ) AS latest_claim_stub_number
     FROM workflow_requests wr
     ${whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : ""}
     ORDER BY wr.updated_at DESC, wr.workflow_request_id DESC
@@ -1541,24 +2266,66 @@ export const listWorkflowRequests = async (user: AuthUser) => {
     }
   );
 
-  return rows.map((row) => ({
-    ...row,
-    academic_snapshot: parseJsonField(row.academic_snapshot_json, {}),
-    approval_snapshot: parseJsonField(row.approval_snapshot_json, {}),
-    fee_snapshot: parseJsonField(row.fee_snapshot_json, {}),
-    payment_snapshot: parseJsonField(row.payment_snapshot_json, {}),
-    items: parseJsonField(row.items_json, []),
-    allowed_actions: Object.entries(WORKFLOW_ACTION_RULES)
-      .filter(([, rule]) => {
-        const currentStatus = row.current_status as WorkflowStatus;
-        return (
-          rule.currentStatuses.includes(currentStatus) &&
-          roles.some((role) => rule.roles.includes(role))
-        );
-      })
-      .map(([action]) => action),
-    permissions: getPermissionsForRolesSync(roles),
-  }));
+  const requestIds = rows.map((row) => Number(row.workflow_request_id)).filter(Boolean);
+  const itemRows: any[] = requestIds.length
+    ? await sequelize.query(
+        `
+        SELECT
+          workflow_request_id,
+          document_type_id,
+          document_name,
+          quantity,
+          final_price
+        FROM workflow_request_items
+        WHERE workflow_request_id IN (:requestIds)
+        ORDER BY workflow_request_id ASC, workflow_request_item_id ASC
+        `,
+        {
+          replacements: { requestIds },
+          type: QueryTypes.SELECT,
+        }
+      )
+    : [];
+
+  const itemsByRequestId = itemRows.reduce<Record<number, any[]>>((acc, item) => {
+    const key = Number(item.workflow_request_id);
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push({
+      document_type_id: item.document_type_id,
+      document_name: item.document_name,
+      quantity: item.quantity,
+      final_price: item.final_price,
+    });
+    return acc;
+  }, {});
+
+  return rows.map((row) => {
+    const mapped = {
+      ...row,
+      academic_snapshot: parseJsonField(row.academic_snapshot_json, {}),
+      approval_snapshot: parseJsonField(row.approval_snapshot_json, {}),
+      fee_snapshot: parseJsonField(row.fee_snapshot_json, {}),
+      payment_snapshot: parseJsonField(row.payment_snapshot_json, {}),
+      items: itemsByRequestId[Number(row.workflow_request_id)] || [],
+      allowed_actions: Object.entries(WORKFLOW_ACTION_RULES)
+        .filter(([, rule]) => {
+          const currentStatus = row.current_status as WorkflowStatus;
+          return (
+            rule.currentStatuses.includes(currentStatus) &&
+            canPerformWorkflowRule(user, roles, rule)
+          );
+        })
+        .map(([action]) => action),
+      permissions: getUserPermissions(user),
+    };
+
+    return {
+      ...mapped,
+      document_access: buildDocumentAccessPolicy(mapped, user),
+    };
+  });
 };
 
 export const getWorkflowRequestDetail = async (
@@ -1580,11 +2347,12 @@ export const getWorkflowRequestDetail = async (
         const currentStatus = detail.current_status as WorkflowStatus;
         return (
           rule.currentStatuses.includes(currentStatus) &&
-          roles.some((role) => rule.roles.includes(role))
+          canPerformWorkflowRule(user, roles, rule)
         );
       })
       .map(([action]) => action),
-    permissions: getPermissionsForRolesSync(roles),
+    permissions: getUserPermissions(user),
+    document_access: buildDocumentAccessPolicy(detail, user),
   };
 };
 
@@ -1612,7 +2380,7 @@ export const advanceWorkflowRequest = async (
   }
 
   const roles = getRoleNames(user);
-  assertCanAdvance(roles, body.target_status);
+  assertCanAdvance(user, roles, body.target_status);
 
   const approvalSnapshot = { ...detail.approval_snapshot };
   const feeSnapshot = { ...detail.fee_snapshot };
@@ -1621,14 +2389,14 @@ export const advanceWorkflowRequest = async (
   const remarks = body.remarks?.trim() || null;
   const updates = body.updates || {};
 
-  if (body.target_status === "UNDER_REGISTRAR_REVIEW") {
+  if (body.target_status === "UNDER_REGISTRAR_VERIFICATION") {
     approvalSnapshot.registrar_status = "UNDER REVIEW";
     approvalSnapshot.registrar_name =
       updates.registrar_name || approvalSnapshot.registrar_name || "Registrar";
     approvalSnapshot.registrar_remarks = remarks;
   }
 
-  if (body.target_status === "AWAITING_DEAN_APPROVAL") {
+  if (body.target_status === "UNDER_DEAN_APPROVAL") {
     if (!detail.dean_user_id) {
       throw new Error("Dean assignment is missing for this request");
     }
@@ -1657,15 +2425,34 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "FEE_ASSESSED") {
+    const defaultAssessedFee = detail.items.reduce(
+      (sum: number, item: any) => sum + Number(item.final_price ?? item.base_price ?? 0),
+      0
+    );
     feeSnapshot.assessed_by_role = getPrimaryRole(user);
-    feeSnapshot.assessed_fee = updates.assessed_fee ?? feeSnapshot.assessed_fee ?? 0;
+    feeSnapshot.assessed_fee =
+      updates.assessed_fee ?? feeSnapshot.assessed_fee ?? defaultAssessedFee;
     feeSnapshot.final_fee =
       updates.final_fee ??
       feeSnapshot.final_fee ??
       feeSnapshot.assessed_fee ??
-      0;
+      defaultAssessedFee;
     feeSnapshot.assessed_at = new Date().toISOString();
     feeSnapshot.notes = remarks;
+  }
+
+  if (body.target_status === "PAYMENT_SUBMITTED") {
+    paymentSnapshot.payment_status = "PAYMENT_SUBMITTED";
+    paymentSnapshot.payment_reference_number =
+      updates.payment_reference_number || paymentSnapshot.payment_reference_number || null;
+    paymentSnapshot.payment_channel =
+      updates.payment_channel || paymentSnapshot.payment_channel || null;
+    paymentSnapshot.proof_file_name =
+      updates.proof_file_name || paymentSnapshot.proof_file_name || null;
+    paymentSnapshot.proof_file_path =
+      updates.proof_file_path || paymentSnapshot.proof_file_path || null;
+    paymentSnapshot.submission_notes = remarks;
+    paymentSnapshot.submitted_at = new Date().toISOString();
   }
 
   if (body.target_status === "PAYMENT_CONFIRMED") {
@@ -1680,14 +2467,14 @@ export const advanceWorkflowRequest = async (
     paymentSnapshot.confirmation_notes = remarks;
   }
 
-  if (body.target_status === "FOR_PROCESSING") {
+  if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
     approvalSnapshot.registrar_processing_owner =
       updates.registrar_name ||
       approvalSnapshot.registrar_name ||
       "Registrar";
   }
 
-  if (body.target_status === "DOCUMENT_PREPARING") {
+  if (body.target_status === "DOCUMENT_GENERATION") {
     approvalSnapshot.registrar_status = "PREPARING DOCUMENT";
   }
 
@@ -1728,9 +2515,38 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "CLAIMED") {
+    releaseSnapshot.release_method = "pickup";
     releaseSnapshot.date_released = new Date().toISOString();
     releaseSnapshot.claimant_name =
       updates.claimant_name || releaseSnapshot.claimant_name || null;
+    releaseSnapshot.claimant_type =
+      updates.claimant_type || releaseSnapshot.claimant_type || "student";
+    releaseSnapshot.claimant_relationship =
+      updates.claimant_relationship || releaseSnapshot.claimant_relationship || null;
+    releaseSnapshot.claimant_id_type =
+      updates.claimant_id_type || releaseSnapshot.claimant_id_type || null;
+    releaseSnapshot.claimant_id_number =
+      updates.claimant_id_number || releaseSnapshot.claimant_id_number || null;
+    releaseSnapshot.authorization_letter_file_path =
+      updates.authorization_letter_file_path ||
+      releaseSnapshot.authorization_letter_file_path ||
+      null;
+    releaseSnapshot.claimant_id_file_path =
+      updates.claimant_id_file_path || releaseSnapshot.claimant_id_file_path || null;
+    releaseSnapshot.signature_file_path =
+      updates.signature_file_path || releaseSnapshot.signature_file_path || null;
+    releaseSnapshot.authorized_representative_name =
+      updates.authorized_representative_name ||
+      releaseSnapshot.authorized_representative_name ||
+      null;
+    releaseSnapshot.authorized_representative_id_type =
+      updates.authorized_representative_id_type ||
+      releaseSnapshot.authorized_representative_id_type ||
+      null;
+    releaseSnapshot.authorized_representative_id_number =
+      updates.authorized_representative_id_number ||
+      releaseSnapshot.authorized_representative_id_number ||
+      null;
     releaseSnapshot.claimed_by = releaseSnapshot.claimant_name;
     releaseSnapshot.release_status = "CLAIMED";
   }
@@ -1738,6 +2554,20 @@ export const advanceWorkflowRequest = async (
   if (body.target_status === "COMPLETED") {
     releaseSnapshot.completed_at = new Date().toISOString();
     releaseSnapshot.release_status = "COMPLETED";
+  }
+
+  if (body.target_status === "CANCELLED") {
+    if (!remarks) {
+      throw new Error("Cancellation reason is required");
+    }
+    releaseSnapshot.release_status = "CANCELLED";
+  }
+
+  if (body.target_status === "REJECTED") {
+    if (!remarks) {
+      throw new Error("Rejection reason is required");
+    }
+    releaseSnapshot.release_status = "REJECTED";
   }
 
   await sequelize.transaction(async (transaction) => {
@@ -1750,7 +2580,13 @@ export const advanceWorkflowRequest = async (
         fee_snapshot_json = :feeSnapshot,
         payment_snapshot_json = :paymentSnapshot,
         release_snapshot_json = :releaseSnapshot,
-        completed_at = CASE WHEN :targetStatus = 'COMPLETED' THEN NOW() ELSE completed_at END
+        completed_at = CASE WHEN :targetStatus = 'COMPLETED' THEN NOW() ELSE completed_at END,
+        rejection_reason = CASE WHEN :targetStatus = 'REJECTED' THEN :terminalRemarks ELSE rejection_reason END,
+        rejected_by_role = CASE WHEN :targetStatus = 'REJECTED' THEN :actedByRole ELSE rejected_by_role END,
+        rejected_at = CASE WHEN :targetStatus = 'REJECTED' THEN NOW() ELSE rejected_at END,
+        cancellation_reason = CASE WHEN :targetStatus = 'CANCELLED' THEN :terminalRemarks ELSE cancellation_reason END,
+        cancelled_by_role = CASE WHEN :targetStatus = 'CANCELLED' THEN :actedByRole ELSE cancelled_by_role END,
+        cancelled_at = CASE WHEN :targetStatus = 'CANCELLED' THEN NOW() ELSE cancelled_at END
       WHERE workflow_request_id = :workflowRequestId
       `,
       {
@@ -1760,6 +2596,8 @@ export const advanceWorkflowRequest = async (
           feeSnapshot: JSON.stringify(feeSnapshot),
           paymentSnapshot: JSON.stringify(paymentSnapshot),
           releaseSnapshot: JSON.stringify(releaseSnapshot),
+          terminalRemarks: remarks,
+          actedByRole: getPrimaryRole(user),
           workflowRequestId,
         },
         transaction,
@@ -1857,9 +2695,25 @@ export const advanceWorkflowRequest = async (
     });
   }
 
+  if (body.target_status === "PAYMENT_SUBMITTED") {
+    await insertPaymentSubmissionRecord({
+      workflowRequestId,
+      submittedByUserId: user.user_id,
+      payment: paymentSnapshot,
+    });
+  }
+
   let releaseRecordId: number | null = null;
   if (
-    ["READY_FOR_RELEASE", "OUT_FOR_DELIVERY", "RELEASED", "CLAIMED", "COMPLETED"].includes(
+    [
+      "READY_FOR_RELEASE",
+      "OUT_FOR_DELIVERY",
+      "RELEASED",
+      "CLAIMED",
+      "COMPLETED",
+      "CANCELLED",
+      "REJECTED",
+    ].includes(
       body.target_status
     )
   ) {
@@ -1895,7 +2749,14 @@ export const advanceWorkflowRequest = async (
     },
   });
 
-  if (body.target_status === "AWAITING_DEAN_APPROVAL") {
+  if (body.target_status === "UNDER_DEAN_APPROVAL") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Registrar verification completed",
+      message: `Request ${detail.request_reference} passed registrar verification and is now under dean approval.`,
+      status: body.target_status,
+    });
+
     await createWorkflowNotification({
       userId: detail.dean_user_id,
       title: "Dean approval required",
@@ -1904,7 +2765,14 @@ export const advanceWorkflowRequest = async (
     });
   }
 
-  if (body.target_status === "AWAITING_COLLEGE_ADMIN_REVIEW") {
+  if (body.target_status === "UNDER_COLLEGE_ADMIN_REVIEW") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Dean approval completed",
+      message: `Request ${detail.request_reference} has been approved by the dean and routed to college administration.`,
+      status: body.target_status,
+    });
+
     await createWorkflowNotification({
       userId: detail.college_admin_user_id,
       title: "College review required",
@@ -1916,17 +2784,42 @@ export const advanceWorkflowRequest = async (
   if (body.target_status === "AWAITING_PAYMENT") {
     await createWorkflowNotification({
       userId: detail.student_user_id,
+      title: "College administration review completed",
+      message: `Request ${detail.request_reference} has cleared college administration review and is now at fee assessment/payment.`,
+      status: body.target_status,
+    });
+
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
       title: "Payment required",
       message: `Request ${detail.request_reference} has been assessed and is awaiting payment confirmation.`,
       status: body.target_status,
     });
   }
 
-  if (body.target_status === "FOR_PROCESSING") {
+  if (body.target_status === "PAYMENT_SUBMITTED") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Payment submitted",
+      message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting accounting confirmation.`,
+      status: body.target_status,
+    });
+  }
+
+  if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
     await createWorkflowNotification({
       userId: detail.student_user_id,
       title: "Payment confirmed",
       message: `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      status: body.target_status,
+    });
+  }
+
+  if (body.target_status === "DOCUMENT_GENERATION") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Registrar processing started",
+      message: `Registrar processing has started for request ${detail.request_reference}.`,
       status: body.target_status,
     });
   }
@@ -1951,6 +2844,24 @@ export const advanceWorkflowRequest = async (
     });
   }
 
+  if (body.target_status === "CANCELLED") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Request cancelled",
+      message: `Request ${detail.request_reference} was cancelled. Reason: ${remarks}`,
+      status: body.target_status,
+    });
+  }
+
+  if (body.target_status === "REJECTED") {
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Request rejected",
+      message: `Request ${detail.request_reference} was rejected. Reason: ${remarks}`,
+      status: body.target_status,
+    });
+  }
+
   await regenerateDocument(workflowRequestId, user.user_id);
 
   if (body.target_status === "READY_FOR_RELEASE") {
@@ -1959,6 +2870,10 @@ export const advanceWorkflowRequest = async (
 
   if (body.target_status === "CLAIMED" || body.target_status === "COMPLETED") {
     await updateClaimStubStatus(workflowRequestId, "USED");
+  }
+
+  if (body.target_status === "CANCELLED" || body.target_status === "REJECTED") {
+    await updateClaimStubStatus(workflowRequestId, "VOID");
   }
 
   return getWorkflowRequestDetail(workflowRequestId, user);
@@ -1970,8 +2885,16 @@ export const getWorkflowRequestLatestDocument = async (
 ) => {
   await ensureWorkflowSchema();
 
+  let detail: any = null;
   if (user) {
-    await getWorkflowRequestDetail(workflowRequestId, user);
+    detail = await getWorkflowRequestDetail(workflowRequestId, user);
+    if (
+      getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+      (!hasAnyPermission(user, ["document.view.own.allowed"]) ||
+        !detail.document_access?.can_view_generated_document)
+    ) {
+      throw new Error("Generated document access is not allowed for this request yet");
+    }
   }
 
   const [document]: any[] = await sequelize.query(
@@ -1992,6 +2915,37 @@ export const getWorkflowRequestLatestDocument = async (
     throw new Error("No generated request form is available");
   }
 
+  if (user) {
+    await createWorkflowAuditLog({
+      userId: user.user_id,
+      action: "GENERATED_DOCUMENT_VIEWED",
+      workflowRequestId,
+      newValue: {
+        workflow_generated_document_id: document.workflow_generated_document_id,
+        file_path: document.file_path,
+      },
+    });
+  }
+
+  return document;
+};
+
+export const getWorkflowRequestLatestDocumentDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  const document = await getWorkflowRequestLatestDocument(workflowRequestId, user);
+
+  await createWorkflowAuditLog({
+    userId: user.user_id,
+    action: "GENERATED_DOCUMENT_DOWNLOADED",
+    workflowRequestId,
+    newValue: {
+      workflow_generated_document_id: document.workflow_generated_document_id,
+      file_path: document.file_path,
+    },
+  });
+
   return document;
 };
 
@@ -2006,7 +2960,224 @@ export const getWorkflowRequestClaimStub = async (
     throw new Error("No claim stub is available for this request");
   }
 
+  if (
+    getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+    (!hasAnyPermission(user, ["claim_stub.view.own", "claim_stub.download.own"]) ||
+      !detail.document_access?.can_view_claim_stub)
+  ) {
+    throw new Error("Claim stub access is not allowed for this request");
+  }
+
+  await createWorkflowAuditLog({
+    userId: user.user_id,
+    action: "CLAIM_STUB_VIEWED",
+    workflowRequestId,
+    newValue: {
+      claim_stub_number: claimStub.claim_stub_number,
+      file_path: claimStub.file_path,
+    },
+  });
+
   return claimStub;
+};
+
+export const getWorkflowRequestClaimStubDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  const claimStub = await getWorkflowRequestClaimStub(workflowRequestId, user);
+
+  await createWorkflowAuditLog({
+    userId: user.user_id,
+    action: "CLAIM_STUB_DOWNLOADED",
+    workflowRequestId,
+    newValue: {
+      claim_stub_number: claimStub.claim_stub_number,
+      file_path: claimStub.file_path,
+    },
+  });
+
+  return claimStub;
+};
+
+const parseClaimLookupToken = (lookupValue: string) => {
+  const trimmed = lookupValue.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return url.searchParams.get("token") || trimmed;
+  } catch {
+    return trimmed.replace(/^TMC-CLAIM:/i, "");
+  }
+};
+
+export const lookupWorkflowClaimStub = async (
+  user: AuthUser,
+  input: {
+    claim_stub_number?: string;
+    request_reference?: string;
+    lookup_token?: string;
+  }
+) => {
+  await ensureWorkflowSchema();
+
+  const roles = getRoleNames(user);
+  if (
+    (!roles.includes("registrar") && !roles.includes("admin")) ||
+    !hasAnyPermission(user, ["claim_stub.verify"])
+  ) {
+    throw new Error("Only registrar or admin with claim stub verification permission can verify claim stubs");
+  }
+
+  const lookupToken = input.lookup_token ? parseClaimLookupToken(input.lookup_token) : "";
+  const lookupTokenHash = lookupToken
+    ? crypto.createHash("sha256").update(lookupToken).digest("hex")
+    : "";
+
+  const clauses: string[] = [];
+  const replacements: Record<string, any> = {};
+
+  if (input.claim_stub_number?.trim()) {
+    clauses.push("wcs.claim_stub_number = :claimStubNumber");
+    replacements.claimStubNumber = input.claim_stub_number.trim();
+  }
+
+  if (input.request_reference?.trim()) {
+    clauses.push("wr.request_reference = :requestReference");
+    replacements.requestReference = input.request_reference.trim();
+  }
+
+  if (lookupTokenHash) {
+    clauses.push("wcs.lookup_token_hash = :lookupTokenHash");
+    replacements.lookupTokenHash = lookupTokenHash;
+  }
+
+  if (clauses.length === 0) {
+    throw new Error("Claim lookup requires a claim stub number, request reference, or QR token");
+  }
+
+  const [claimRow]: any[] = await sequelize.query(
+    `
+    SELECT
+      wcs.workflow_claim_stub_id,
+      wcs.claim_stub_number,
+      wcs.claim_stub_status,
+      wcs.file_path AS claim_stub_file_path,
+      wr.workflow_request_id
+    FROM workflow_claim_stubs wcs
+    JOIN workflow_requests wr ON wr.workflow_request_id = wcs.workflow_request_id
+    WHERE ${clauses.join(" OR ")}
+    ORDER BY wcs.generated_at DESC, wcs.workflow_claim_stub_id DESC
+    LIMIT 1
+    `,
+    {
+      replacements,
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (!claimRow) {
+    throw new Error("Claim stub lookup failed");
+  }
+
+  const detail = await getRequestDetailInternal(Number(claimRow.workflow_request_id));
+  const currentStatus = detail.current_status as WorkflowStatus;
+  const invalidStatuses: WorkflowStatus[] = ["CANCELLED", "REJECTED", "COMPLETED"];
+
+  await createWorkflowAuditLog({
+    userId: user.user_id,
+    action: "CLAIM_VERIFICATION_INITIATED",
+    workflowRequestId: Number(claimRow.workflow_request_id),
+    newValue: {
+      claim_stub_number: claimRow.claim_stub_number,
+      current_status: currentStatus,
+    },
+  });
+
+  return {
+    workflow_request_id: detail.workflow_request_id,
+    request_reference: detail.request_reference,
+    current_status: currentStatus,
+    claim_stub: {
+      workflow_claim_stub_id: claimRow.workflow_claim_stub_id,
+      claim_stub_number: claimRow.claim_stub_number,
+      claim_stub_status: claimRow.claim_stub_status,
+      file_path: claimRow.claim_stub_file_path,
+    },
+    is_claimable:
+      currentStatus === "READY_FOR_RELEASE" &&
+      String(detail.release_snapshot?.release_method || detail.delivery_method || "").toLowerCase() ===
+        "pickup" &&
+      claimRow.claim_stub_status === "ACTIVE",
+    claim_block_reason:
+      invalidStatuses.includes(currentStatus)
+        ? `Request is ${currentStatus.toLowerCase()}`
+        : claimRow.claim_stub_status !== "ACTIVE"
+        ? `Claim stub is ${String(claimRow.claim_stub_status).toLowerCase()}`
+        : currentStatus !== "READY_FOR_RELEASE"
+        ? `Request is ${currentStatus.toLowerCase()}`
+        : null,
+    academic_snapshot: detail.academic_snapshot,
+    release_snapshot: detail.release_snapshot,
+    items: detail.items,
+    payment_snapshot: detail.payment_snapshot,
+    latest_claim_stub: detail.latest_claim_stub,
+    latest_generated_document: detail.latest_generated_document,
+    actions: detail.actions,
+  };
+};
+
+export const confirmWorkflowClaimStub = async (
+  claimStubId: number,
+  user: AuthUser,
+  input: {
+    remarks?: string;
+    updates?: Record<string, any>;
+  }
+) => {
+  await ensureWorkflowSchema();
+
+  const [claimStub]: any[] = await sequelize.query(
+    `
+    SELECT workflow_request_id, claim_stub_status
+    FROM workflow_claim_stubs
+    WHERE workflow_claim_stub_id = :claimStubId
+    LIMIT 1
+    `,
+    {
+      replacements: { claimStubId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (!claimStub) {
+    throw new Error("Claim stub not found");
+  }
+
+  if (String(claimStub.claim_stub_status || "").toUpperCase() !== "ACTIVE") {
+    throw new Error("Claim stub is no longer active");
+  }
+
+  const claimantType = String(input.updates?.claimant_type || "student").toLowerCase();
+  if (
+    claimantType === "representative" &&
+    !(
+      input.updates?.authorization_letter_file_path ||
+      input.updates?.authorized_representative_name
+    )
+  ) {
+    throw new Error("Representative claim requires authorization details");
+  }
+
+  return processWorkflowAction(
+    Number(claimStub.workflow_request_id),
+    user,
+    "release_claim",
+    input
+  );
 };
 
 export const getWorkflowRequestTimeline = async (
@@ -2049,21 +3220,21 @@ export const processWorkflowAction = async (
     throw new Error(`Action ${action} is not allowed when request is ${currentStatus}`);
   }
 
-  if (!roles.some((role) => rule.roles.includes(role))) {
-    throw new Error(`You do not have access to perform ${action}`);
+  if (!canPerformWorkflowRule(user, roles, rule)) {
+    throw new Error(`Missing permission to perform ${action}`);
   }
 
   if (action === "registrar_verification") {
     if (currentStatus === "SUBMITTED") {
       await advanceWorkflowRequest(workflowRequestId, user, {
-        target_status: "UNDER_REGISTRAR_REVIEW",
+        target_status: "UNDER_REGISTRAR_VERIFICATION",
         remarks: input.remarks,
         updates: input.updates,
       });
     }
 
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "AWAITING_DEAN_APPROVAL",
+      target_status: "UNDER_DEAN_APPROVAL",
       remarks: input.remarks,
       updates: input.updates,
     });
@@ -2077,7 +3248,7 @@ export const processWorkflowAction = async (
     });
 
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "AWAITING_COLLEGE_ADMIN_REVIEW",
+      target_status: "UNDER_COLLEGE_ADMIN_REVIEW",
       remarks: input.remarks,
       updates: input.updates,
     });
@@ -2105,7 +3276,33 @@ export const processWorkflowAction = async (
     });
   }
 
+  if (action === "payment_submit") {
+    const finalFee = Number(
+      detail.fee_snapshot?.final_fee ?? detail.fee_snapshot?.assessed_fee ?? 0
+    );
+
+    if (finalFee > 0 && !input.updates?.proof_file_path && !input.updates?.payment_reference_number) {
+      throw new Error("Payment reference number or proof file is required");
+    }
+
+    return advanceWorkflowRequest(workflowRequestId, user, {
+      target_status: "PAYMENT_SUBMITTED",
+      remarks: input.remarks,
+      updates: input.updates,
+    });
+  }
+
   if (action === "payment_confirm") {
+    const finalFee = Number(
+      detail.fee_snapshot?.final_fee ?? detail.fee_snapshot?.assessed_fee ?? 0
+    );
+
+    if (currentStatus === "AWAITING_PAYMENT" && finalFee > 0) {
+      throw new Error(
+        "Paid requests must have a submitted payment record before accounting confirmation"
+      );
+    }
+
     await advanceWorkflowRequest(workflowRequestId, user, {
       target_status: "PAYMENT_CONFIRMED",
       remarks: input.remarks,
@@ -2113,7 +3310,7 @@ export const processWorkflowAction = async (
     });
 
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "FOR_PROCESSING",
+      target_status: "UNDER_REGISTRAR_PROCESSING",
       remarks: input.remarks,
       updates: input.updates,
     });
@@ -2121,7 +3318,7 @@ export const processWorkflowAction = async (
 
   if (action === "document_prepare") {
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "DOCUMENT_PREPARING",
+      target_status: "DOCUMENT_GENERATION",
       remarks: input.remarks,
       updates: input.updates,
     });
@@ -2158,6 +3355,21 @@ export const processWorkflowAction = async (
   }
 
   if (action === "release_claim") {
+    const claimantType = String(input.updates?.claimant_type || "student").toLowerCase();
+    if (claimantType === "representative") {
+      if (!input.updates?.claimant_name) {
+        throw new Error("Representative claimant name is required");
+      }
+
+      if (!input.updates?.claimant_id_type || !input.updates?.claimant_id_number) {
+        throw new Error("Representative ID type and ID number are required");
+      }
+
+      if (!input.updates?.authorization_letter_file_path) {
+        throw new Error("Authorization letter is required for representative claims");
+      }
+    }
+
     return advanceWorkflowRequest(workflowRequestId, user, {
       target_status: "CLAIMED",
       remarks: input.remarks,
@@ -2173,6 +3385,25 @@ export const processWorkflowAction = async (
       target_status: "COMPLETED",
       remarks: input.remarks,
       updates: input.updates,
+    });
+  }
+
+  if (action === "request_cancel") {
+    return advanceWorkflowRequest(workflowRequestId, user, {
+      target_status: "CANCELLED",
+      remarks: input.remarks,
+      updates: input.updates,
+    });
+  }
+
+  if (action === "registrar_reject" || action === "dean_reject" || action === "college_admin_reject") {
+    return advanceWorkflowRequest(workflowRequestId, user, {
+      target_status: "REJECTED",
+      remarks: input.remarks,
+      updates: {
+        ...(input.updates || {}),
+        rejected_by_role: getPrimaryRole(user),
+      },
     });
   }
 

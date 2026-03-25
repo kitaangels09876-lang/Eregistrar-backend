@@ -8,6 +8,7 @@ export class DocumentType extends Model {
   declare base_price: number;
   declare requirements: string;
   declare estimated_processing_days: number;
+  declare is_free_first_time: boolean;
   declare is_active: boolean;
 }
 
@@ -40,6 +41,11 @@ DocumentType.init(
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 1
+    },
+    is_free_first_time: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
     },
     is_active: {
       type: DataTypes.BOOLEAN,

@@ -6,11 +6,7 @@ import { sequelize } from "./src/models";
 import { errorHandler } from "./src/middlewares/error.middleware";
 
 import authRoutes from "./src/routes/auth.routes";
-import dashboardRoutes from "./src/routes/dashboard.routes";
 import activityLogRoutes from "./src/routes/auditlog.routes";
-import studentRequestRoutes from "./src/routes/studentrequest.routes";
-import requestStatusRoutes from "./src/routes/requestStatus.routes";
-import paymentRoutes from "./src/routes/payment.routes";
 import announcementRoutes from "./src/routes/announcement.routes";
 import documentRoutes from "./src/routes/document.routes";
 import paymentMethod from "./src/routes/paymentMethod.routes";
@@ -18,10 +14,10 @@ import studentRoutes from "./src/routes/student.routes";
 import adminRoutes from "./src/routes/admin.routes";
 import roleRoutes from "./src/routes/role.routes";
 import systemSettingsRoutes from "./src/routes/systemSettings.routes";
-import documentRequestRoutes from "./src/routes/document-request.routes";
 import courseRoutes from "./src/routes/course.routes";
 import noticationRoutes from "./src/routes/notification.routes";
 import workflowRequestRoutes from "./src/routes/workflow/requestWorkflow.routes";
+import { ensureDefaultDocumentTypes } from "./src/services/defaultDocumentSeed.service";
 
 dotenv.config();
 
@@ -60,17 +56,12 @@ app.use("/api/auth", authRoutes);
 
 // STUDENT ROUTES
 app.use("/api", studentRoutes);
-app.use("/api", studentRequestRoutes);
-app.use("/api/student", documentRequestRoutes);
 
 // NOTIFICATION ROUTES
 app.use("/api", noticationRoutes);
 
 // ADMIN / REGISTRAR ROUTES
-app.use("/api", dashboardRoutes);
 app.use("/api", activityLogRoutes);
-app.use("/api", requestStatusRoutes);
-app.use("/api", paymentRoutes);
 app.use("/api", announcementRoutes);
 app.use("/api", documentRoutes);
 app.use("/api", paymentMethod);
@@ -92,9 +83,11 @@ app.use((_req, res) => {
 
 sequelize
   .authenticate()
-  .then(() => {
+  .then(async () => {
     console.log("✅ Database connected successfully");
 
+    await ensureDefaultDocumentTypes();
+    console.log("Default document types ensured");
     app.listen(PORT, () => {
       console.log(`🚀 Server running at http://localhost:${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);

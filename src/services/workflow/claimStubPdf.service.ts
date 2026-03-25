@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
+import QRCode from "qrcode";
 
 type ClaimStubRequest = {
   request_reference: string;
@@ -14,6 +15,8 @@ type ClaimStubRequest = {
     quantity: number;
   }>;
   purpose: string;
+  lookup_token: string;
+  verification_url: string;
 };
 
 const ensureDirectory = (directoryPath: string) => {
@@ -74,6 +77,12 @@ export const generateClaimStubPdf = async (
   const fileName = `${request.claim_stub_number}.pdf`;
   const absolutePath = path.join(uploadsDir, fileName);
   const relativePath = `/uploads/workflow/claim-stubs/${fileName}`;
+
+  const qrDataUrl = await QRCode.toDataURL(request.verification_url, {
+    margin: 1,
+    width: 280,
+  });
+  const qrImageBuffer = Buffer.from(qrDataUrl.split(",")[1], "base64");
 
   await new Promise<void>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -150,8 +159,13 @@ export const generateClaimStubPdf = async (
 
     y += 88;
     doc.rect(48, y, 150, 150).lineWidth(0.8).strokeColor("#222222").stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text("QR / BARCODE PLACEHOLDER", 60, y + 64, {
-      width: 126,
+    doc.image(qrImageBuffer, 58, y + 10, {
+      fit: [130, 130],
+      align: "center",
+      valign: "center",
+    });
+    doc.font("Helvetica").fontSize(7).text("SCAN TO VERIFY", 48, y + 136, {
+      width: 150,
       align: "center",
     });
 
@@ -159,8 +173,9 @@ export const generateClaimStubPdf = async (
     line(doc, "CLAIM STUB NO.:", request.claim_stub_number, 240, y + 32, 250);
     line(doc, "REFERENCE NO.:", request.request_reference, 240, y + 52, 250);
     line(doc, "CURRENT STATUS:", upper(request.current_status), 240, y + 72, 250);
-    line(doc, "ISSUED BY:", "EREGISTRAR SYSTEM", 240, y + 92, 250);
-    line(doc, "GENERATED AT:", safeDateTime(new Date().toISOString()), 240, y + 112, 250);
+    line(doc, "LOOKUP TOKEN:", request.lookup_token, 240, y + 92, 250);
+    line(doc, "ISSUED BY:", "EREGISTRAR SYSTEM", 240, y + 112, 250);
+    line(doc, "GENERATED AT:", safeDateTime(new Date().toISOString()), 240, y + 132, 250);
 
     doc.end();
 

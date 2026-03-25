@@ -7,7 +7,7 @@ const router = Router();
 router.get(
   "/my-notifications",
   authenticateToken,
-  requireRole("admin", "registrar", "student"),
+  requireRole("admin", "registrar", "student", "alumni", "dean", "college_admin", "accounting", "treasurer"),
   getMyNotifications
 );
 
