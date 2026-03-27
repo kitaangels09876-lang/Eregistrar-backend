@@ -35,7 +35,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "approval.college_admin.view",
     "approval.college_admin.approve",
   ],
-  accounting: ["payment.confirm", "reports.view"],
   treasurer: ["payment.confirm", "reports.view"],
   admin: [
     "request.view.all",

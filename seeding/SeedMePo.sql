@@ -17,7 +17,6 @@ USE eRegistrar;
 -- registrar@tmc.edu.ph       / Registrar@123!
 -- dean@tmc.edu.ph            / Dean@123!
 -- collegeadmin@tmc.edu.ph    / CollegeAdmin@123!
--- accounting@tmc.edu.ph      / Accounting@123!
 -- treasurer@tmc.edu.ph       / Treasurer@123!
 -- student@tmc.edu.ph         / Student@123!
 -- alumni@tmc.edu.ph          / Alumni@123!
@@ -40,7 +39,6 @@ INSERT IGNORE INTO roles (role_name, role_description) VALUES
 ('registrar', 'Registrar operations staff'),
 ('dean', 'Academic dean approver'),
 ('college_admin', 'College administration reviewer'),
-('accounting', 'Accounting staff for payment confirmation'),
 ('treasurer', 'Treasurer staff for payment confirmation');
 
 -- ===========================================================
@@ -59,7 +57,7 @@ INSERT IGNORE INTO permissions (permission_key, permission_description) VALUES
 ('approval.college_admin.approve', 'Approve college administration scoped requests'),
 ('payment.assess', 'Assess fees before payment confirmation'),
 ('payment.submit.own', 'Submit own payment proof'),
-('payment.confirm', 'Confirm payment as accounting or treasurer'),
+('payment.confirm', 'Confirm payment as treasurer'),
 ('document.prepare', 'Prepare generated registrar output'),
 ('document.generate', 'Generate final registrar output'),
 ('document.view.own.allowed', 'View own generated document when policy allows'),
@@ -152,15 +150,6 @@ JOIN permissions p ON p.permission_key IN (
   'payment.confirm',
   'reports.view'
 )
-WHERE r.role_name = 'accounting';
-
-INSERT IGNORE INTO role_permissions (role_id, permission_id)
-SELECT r.role_id, p.permission_id
-FROM roles r
-JOIN permissions p ON p.permission_key IN (
-  'payment.confirm',
-  'reports.view'
-)
 WHERE r.role_name = 'treasurer';
 
 INSERT IGNORE INTO role_permissions (role_id, permission_id)
@@ -201,7 +190,6 @@ VALUES
 ('registrar@tmc.edu.ph', '$2b$10$NaE8QRn699wic3nr7AQVl.91UOWoI.jd7L5swX1zst4mUCnzqB4VS', 'registrar', 'active'),
 ('dean@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
 ('collegeadmin@tmc.edu.ph', '$2b$10$LKHRJIYDfAsbXI5Zol2FDumhg4xyx.5f4Ql0/P37a6a4T/OnLpvv2', 'college_admin', 'active'),
-('accounting@tmc.edu.ph', '$2b$10$u1XcNnpsZ30jaekhPHqfKOGpz3Hi5hAGifoBgJo5A00ClcWw/ROlO', 'accounting', 'active'),
 ('treasurer@tmc.edu.ph', '$2b$10$rs89aL.8RjQu86ycypCEvuMPCGzrFz9O0AjvCXQDYCRSXmYYhJIKu', 'treasurer', 'active'),
 ('student@tmc.edu.ph', '$2b$10$w38ZrRYzw0UkpcHzPtVbLu9CM1kW5cHG5d.kdXnL9qpV8heAGPK1e', 'student', 'active'),
 ('alumni@tmc.edu.ph', '$2b$10$c5ocrXofbiCovGmvIxtjFuLEqBiFlU..ycByvqhXyS3t6Rvn7osOa', 'alumni', 'active'),
@@ -246,13 +234,6 @@ FROM users u
 JOIN roles r ON r.role_name = 'college_admin'
 JOIN users admin_user ON admin_user.email = 'admin@tmc.edu.ph'
 WHERE u.email = 'collegeadmin@tmc.edu.ph';
-
-INSERT IGNORE INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.user_id, r.role_id, admin_user.user_id
-FROM users u
-JOIN roles r ON r.role_name = 'accounting'
-JOIN users admin_user ON admin_user.email = 'admin@tmc.edu.ph'
-WHERE u.email = 'accounting@tmc.edu.ph';
 
 INSERT IGNORE INTO user_roles (user_id, role_id, assigned_by)
 SELECT u.user_id, r.role_id, admin_user.user_id
@@ -355,16 +336,6 @@ INSERT INTO admin_profiles (user_id, first_name, middle_name, last_name, contact
 SELECT u.user_id, 'Celia', NULL, 'Administrator', '09170000004'
 FROM users u
 WHERE u.email = 'collegeadmin@tmc.edu.ph'
-ON DUPLICATE KEY UPDATE
-first_name = VALUES(first_name),
-middle_name = VALUES(middle_name),
-last_name = VALUES(last_name),
-contact_number = VALUES(contact_number);
-
-INSERT INTO admin_profiles (user_id, first_name, middle_name, last_name, contact_number)
-SELECT u.user_id, 'Ana', NULL, 'Accounting', '09170000005'
-FROM users u
-WHERE u.email = 'accounting@tmc.edu.ph'
 ON DUPLICATE KEY UPDATE
 first_name = VALUES(first_name),
 middle_name = VALUES(middle_name),

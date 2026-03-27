@@ -10,7 +10,6 @@ export const validateAdminRegister = (
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
   let {
@@ -21,6 +20,7 @@ export const validateAdminRegister = (
     middle_name,
     last_name,
     contact_number,
+    dean_course_ids,
   } = req.body;
 
   const errors: { field: string; message: string }[] = [];
@@ -32,6 +32,29 @@ export const validateAdminRegister = (
   if (middle_name !== undefined) middle_name = String(middle_name);
   if (last_name !== undefined) last_name = String(last_name);
   if (contact_number !== undefined) contact_number = String(contact_number);
+
+  const normalizedDeanCourseIds = (() => {
+    if (Array.isArray(dean_course_ids)) {
+      return dean_course_ids
+        .map((courseId) => Number(courseId))
+        .filter((courseId) => Number.isInteger(courseId) && courseId > 0);
+    }
+
+    if (typeof dean_course_ids === "string" && dean_course_ids.trim()) {
+      try {
+        const parsed = JSON.parse(dean_course_ids);
+        return Array.isArray(parsed)
+          ? parsed
+              .map((courseId) => Number(courseId))
+              .filter((courseId) => Number.isInteger(courseId) && courseId > 0)
+          : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return [];
+  })();
 
   if (!email?.trim()) {
     errors.push({ field: "email", message: "Email is required" });
@@ -65,6 +88,13 @@ export const validateAdminRegister = (
     errors.push({
       field: "role",
       message: `Role must be one of: ${allowedRoles.join(", ")}`,
+    });
+  }
+
+  if (role?.trim().toLowerCase() === "dean" && normalizedDeanCourseIds.length === 0) {
+    errors.push({
+      field: "dean_course_ids",
+      message: "Select at least one course assignment for the dean role",
     });
   }
 
@@ -124,6 +154,7 @@ export const validateAdminRegister = (
   req.body.middle_name = middle_name?.trim() || null;
   req.body.last_name = last_name.trim();
   req.body.contact_number = contact_number.trim();
+  req.body.dean_course_ids = normalizedDeanCourseIds;
 
   next();
 };

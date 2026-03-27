@@ -27,7 +27,6 @@ const STAFF_ROLES = [
   "registrar",
   "dean",
   "college_admin",
-  "accounting",
   "treasurer",
 ] as const;
 
@@ -57,7 +56,7 @@ const QUEUE_ACCESS_RULES: Array<{
   },
   {
     statuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
-    roles: ["accounting", "treasurer", "admin"],
+    roles: ["treasurer", "admin"],
     permissions: ["payment.confirm", "request.view.all"],
   },
 ];
@@ -68,7 +67,6 @@ const VIEW_PERMISSION_RULES = {
   admin: "request.view.all",
   dean: "approval.dean.view",
   college_admin: "approval.college_admin.view",
-  accounting: "payment.confirm",
   treasurer: "payment.confirm",
 } as const;
 
@@ -104,8 +102,8 @@ const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
   FEE_ASSESSED: ["registrar", "admin"],
   AWAITING_PAYMENT: ["registrar", "admin"],
   PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
-  PAYMENT_CONFIRMED: ["treasurer", "accounting", "admin"],
-  UNDER_REGISTRAR_PROCESSING: ["treasurer", "accounting", "admin"],
+  PAYMENT_CONFIRMED: ["treasurer", "admin"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "admin"],
   DOCUMENT_GENERATION: ["registrar", "admin"],
   READY_FOR_RELEASE: ["registrar", "admin"],
   CLAIMED: ["registrar", "admin"],
@@ -622,7 +620,7 @@ const WORKFLOW_ACTION_RULES: Record<
     currentStatuses: ["AWAITING_PAYMENT"],
   },
   payment_confirm: {
-    roles: ["treasurer", "accounting", "admin"],
+    roles: ["treasurer", "admin"],
     permissions: ["payment.confirm"],
     currentStatuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
   },
@@ -1143,7 +1141,6 @@ const buildDocumentAccessPolicy = (detail: any, user?: AuthUser) => {
     roles.includes("registrar") ||
     roles.includes("dean") ||
     roles.includes("college_admin") ||
-    roles.includes("accounting") ||
     roles.includes("treasurer");
 
   if (isStaff) {
@@ -1180,7 +1177,91 @@ const buildDocumentAccessPolicy = (detail: any, user?: AuthUser) => {
   };
 };
 
-const assertCanViewWorkflowRequest = (
+const getWorkflowRequestAcademicScope = (detail: any) => {
+  const academicSnapshot = detail?.academic_snapshot || {};
+  const parseScopeId = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  };
+
+  return {
+    course_id: parseScopeId(academicSnapshot.course_id),
+    department_id: parseScopeId(academicSnapshot.department_id),
+    college_id: parseScopeId(academicSnapshot.college_id),
+  };
+};
+
+const hasScopedDeanAccess = async (detail: any, userId: number) => {
+  if (detail.dean_user_id === userId) {
+    return true;
+  }
+
+  const scope = getWorkflowRequestAcademicScope(detail);
+
+  if (!scope.course_id && !scope.department_id && !scope.college_id) {
+    return false;
+  }
+
+  const [match]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM workflow_dean_assignments
+    WHERE user_id = :userId
+      AND is_active = 1
+      AND (
+        course_id = :courseId
+        OR department_id = :departmentId
+        OR college_id = :collegeId
+      )
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        userId,
+        courseId: scope.course_id,
+        departmentId: scope.department_id,
+        collegeId: scope.college_id,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return Boolean(match);
+};
+
+const hasScopedCollegeAdminAccess = async (detail: any, userId: number) => {
+  if (detail.college_admin_user_id === userId) {
+    return true;
+  }
+
+  const scope = getWorkflowRequestAcademicScope(detail);
+
+  if (!scope.college_id) {
+    return false;
+  }
+
+  const [match]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM workflow_college_admin_assignments
+    WHERE user_id = :userId
+      AND college_id = :collegeId
+      AND is_active = 1
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        userId,
+        collegeId: scope.college_id,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return Boolean(match);
+};
+
+const assertCanViewWorkflowRequest = async (
   detail: any,
   user: AuthUser,
   roles: string[]
@@ -1209,7 +1290,7 @@ const assertCanViewWorkflowRequest = (
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
       throw new Error("Missing permission to view dean workflow requests");
     }
-    if (detail.dean_user_id !== user.user_id) {
+    if (!(await hasScopedDeanAccess(detail, user.user_id))) {
       throw new Error("You do not have access to this dean workflow request");
     }
     return;
@@ -1219,16 +1300,15 @@ const assertCanViewWorkflowRequest = (
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.college_admin])) {
       throw new Error("Missing permission to view college workflow requests");
     }
-    if (detail.college_admin_user_id !== user.user_id) {
+    if (!(await hasScopedCollegeAdminAccess(detail, user.user_id))) {
       throw new Error("You do not have access to this college workflow request");
     }
     return;
   }
 
-  if (roles.includes("accounting") || roles.includes("treasurer")) {
+  if (roles.includes("treasurer")) {
     if (
       !hasAnyPermission(user, [
-        VIEW_PERMISSION_RULES.accounting,
         VIEW_PERMISSION_RULES.treasurer,
       ])
     ) {
@@ -1858,10 +1938,6 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   }
 
   const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
-  const requiredDocuments = documents.filter((document) => String(document.requirements || "").trim());
-  if (requiredDocuments.length > 0 && attachments.length === 0) {
-    throw new Error("Attachments are required for the selected document request");
-  }
 
   const academicScope = await resolveAcademicScope(student.course_id || null);
   const requestReference = await getRequestReference();
@@ -2174,18 +2250,43 @@ export const listWorkflowRequests = async (
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
       throw new Error("Missing permission to list dean workflow queue");
     }
-    whereClauses.push("wr.dean_user_id = :userId");
+    whereClauses.push(`
+      (
+        wr.dean_user_id = :userId
+        OR EXISTS (
+          SELECT 1
+          FROM workflow_dean_assignments wda
+          WHERE wda.user_id = :userId
+            AND wda.is_active = 1
+            AND (
+              wda.course_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.course_id')), '') AS UNSIGNED)
+              OR wda.department_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.department_id')), '') AS UNSIGNED)
+              OR wda.college_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.college_id')), '') AS UNSIGNED)
+            )
+        )
+      )
+    `);
     replacements.userId = user.user_id;
   } else if (roles.includes("college_admin")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.college_admin])) {
       throw new Error("Missing permission to list college workflow queue");
     }
-    whereClauses.push("wr.college_admin_user_id = :userId");
+    whereClauses.push(`
+      (
+        wr.college_admin_user_id = :userId
+        OR EXISTS (
+          SELECT 1
+          FROM workflow_college_admin_assignments wcaa
+          WHERE wcaa.user_id = :userId
+            AND wcaa.is_active = 1
+            AND wcaa.college_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.college_id')), '') AS UNSIGNED)
+        )
+      )
+    `);
     replacements.userId = user.user_id;
-  } else if (roles.includes("accounting") || roles.includes("treasurer")) {
+  } else if (roles.includes("treasurer")) {
     if (
       !hasAnyPermission(user, [
-        VIEW_PERMISSION_RULES.accounting,
         VIEW_PERMISSION_RULES.treasurer,
       ])
     ) {
@@ -2397,7 +2498,7 @@ export const getWorkflowRequestDetail = async (
 
   const detail = await getRequestDetailInternal(workflowRequestId);
   const roles = getRoleNames(user);
-  assertCanViewWorkflowRequest(detail, user, roles);
+  await assertCanViewWorkflowRequest(detail, user, roles);
 
   return {
     ...detail,
@@ -2449,6 +2550,8 @@ export const advanceWorkflowRequest = async (
   const releaseSnapshot = { ...detail.release_snapshot };
   const remarks = body.remarks?.trim() || null;
   const updates = body.updates || {};
+  let nextDeanUserId = detail.dean_user_id || null;
+  let nextCollegeAdminUserId = detail.college_admin_user_id || null;
 
   if (body.target_status === "UNDER_REGISTRAR_VERIFICATION") {
     approvalSnapshot.registrar_status = "UNDER REVIEW";
@@ -2458,13 +2561,14 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "UNDER_DEAN_APPROVAL") {
-    if (!detail.dean_user_id) {
+    const scope = await resolveAcademicScope(
+      getWorkflowRequestAcademicScope(detail).course_id
+    );
+    nextDeanUserId = scope.dean_user_id || detail.dean_user_id || null;
+
+    if (!nextDeanUserId) {
       throw new Error("Dean assignment is missing for this request");
     }
-    assertSignaturePresent(
-      updates.signature_file_path,
-      "Registrar signature is required before forwarding to dean approval"
-    );
     approvalSnapshot.registrar_status = "VERIFIED";
     approvalSnapshot.registrar_name =
       updates.registrar_name || approvalSnapshot.registrar_name || "Registrar";
@@ -2493,6 +2597,20 @@ export const advanceWorkflowRequest = async (
       updates.signature_file_name || approvalSnapshot.dean_signature_file_name || null;
     approvalSnapshot.dean_signature_file_path =
       updates.signature_file_path || approvalSnapshot.dean_signature_file_path || null;
+  }
+
+  if (body.target_status === "UNDER_COLLEGE_ADMIN_REVIEW") {
+    const scope = await resolveAcademicScope(
+      getWorkflowRequestAcademicScope(detail).course_id
+    );
+    nextCollegeAdminUserId =
+      scope.college_admin_user_id || detail.college_admin_user_id || null;
+
+    if (!nextCollegeAdminUserId) {
+      throw new Error(
+        "College administrator assignment is missing for this request"
+      );
+    }
   }
 
   if (body.target_status === "COLLEGE_ADMIN_APPROVED") {
@@ -2551,7 +2669,7 @@ export const advanceWorkflowRequest = async (
   if (body.target_status === "PAYMENT_CONFIRMED") {
     assertSignaturePresent(
       updates.signature_file_path,
-      "Treasurer or accounting signature is required before confirming payment"
+      "Treasurer signature is required before confirming payment"
     );
     paymentSnapshot.payment_status = "CONFIRMED";
     paymentSnapshot.official_receipt_no =
@@ -2657,6 +2775,8 @@ export const advanceWorkflowRequest = async (
       `
       UPDATE workflow_requests
       SET
+        dean_user_id = :deanUserId,
+        college_admin_user_id = :collegeAdminUserId,
         current_status = :targetStatus,
         approval_snapshot_json = :approvalSnapshot,
         fee_snapshot_json = :feeSnapshot,
@@ -2673,6 +2793,8 @@ export const advanceWorkflowRequest = async (
       `,
       {
         replacements: {
+          deanUserId: nextDeanUserId,
+          collegeAdminUserId: nextCollegeAdminUserId,
           targetStatus: body.target_status,
           approvalSnapshot: JSON.stringify(approvalSnapshot),
           feeSnapshot: JSON.stringify(feeSnapshot),
@@ -2838,7 +2960,7 @@ export const advanceWorkflowRequest = async (
     });
 
     await createWorkflowNotification({
-      userId: detail.dean_user_id,
+      userId: nextDeanUserId,
       title: "Dean approval required",
       message: `Request ${detail.request_reference} is awaiting your approval.`,
       status: body.target_status,
@@ -2854,7 +2976,7 @@ export const advanceWorkflowRequest = async (
     });
 
     await createWorkflowNotification({
-      userId: detail.college_admin_user_id,
+      userId: nextCollegeAdminUserId,
       title: "College review required",
       message: `Request ${detail.request_reference} is awaiting college administration review.`,
       status: body.target_status,
@@ -2881,7 +3003,7 @@ export const advanceWorkflowRequest = async (
     await createWorkflowNotification({
       userId: detail.student_user_id,
       title: "Payment submitted",
-      message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting accounting confirmation.`,
+      message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting treasurer confirmation.`,
       status: body.target_status,
     });
   }
@@ -3394,7 +3516,7 @@ export const processWorkflowAction = async (
 
     if (currentStatus === "AWAITING_PAYMENT" && finalFee > 0) {
       throw new Error(
-        "Paid requests must have a submitted payment record before accounting confirmation"
+        "Paid requests must have a submitted payment record before treasurer confirmation"
       );
     }
 

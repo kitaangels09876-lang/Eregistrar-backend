@@ -32,7 +32,7 @@ WHERE
   (r.role_name = 'registrar' AND p.permission_key IN ('request.view.all', 'request.verify', 'payment.assess', 'document.prepare', 'document.generate', 'document.release', 'document.claim')) OR
   (r.role_name = 'dean' AND p.permission_key IN ('approval.dean.view', 'approval.dean.approve')) OR
   (r.role_name = 'college_admin' AND p.permission_key IN ('approval.college_admin.view', 'approval.college_admin.approve')) OR
-  (r.role_name IN ('accounting', 'treasurer') AND p.permission_key IN ('payment.confirm', 'reports.view')) OR
+  (r.role_name = 'treasurer' AND p.permission_key IN ('payment.confirm', 'reports.view')) OR
   (r.role_name = 'admin' AND p.permission_key IN (
     'request.view.all',
     'request.verify',

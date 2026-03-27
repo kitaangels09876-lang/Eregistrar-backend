@@ -27,6 +27,10 @@ import {
   revokeRefreshToken,
   revokeRefreshTokenById,
 } from "../services/auth/refreshToken.service";
+import {
+  listDeanAssignments,
+  replaceDeanAssignments,
+} from "../services/auth/staffAssignments.service";
 
 const isProductionEnvironment = (): boolean =>
   process.env.NODE_ENV === "production";
@@ -47,13 +51,31 @@ const getVerificationUrlForUser = (userId: number, email: string): string =>
     })
   );
 
-const buildAuthScopes = (roles: string[], profile: any) => ({
+const buildAuthScopes = (
+  roles: string[],
+  profile: any,
+  workflowScope: Record<string, unknown> = {}
+) => ({
   roles,
   academic: {
     course_id: profile?.course_id ?? null,
     course_name: profile?.course_name ?? null,
+    ...workflowScope,
   },
 });
+
+const buildDeanAcademicScope = async (roles: string[], userId: number) => {
+  if (!roles.includes("dean")) {
+    return {};
+  }
+
+  const deanCourses = await listDeanAssignments(userId);
+
+  return {
+    dean_course_ids: deanCourses.map((assignment) => assignment.course_id),
+    dean_courses: deanCourses,
+  };
+};
 
 
 export const registerStaff = async (req: Request, res: Response) => {
@@ -63,7 +85,6 @@ export const registerStaff = async (req: Request, res: Response) => {
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
 
@@ -76,6 +97,7 @@ export const registerStaff = async (req: Request, res: Response) => {
       middle_name,
       last_name,
       contact_number,
+      dean_course_ids,
     } = req.body;
 
     const creatorUserId = getUserIdFromRequest(req);
@@ -143,6 +165,10 @@ export const registerStaff = async (req: Request, res: Response) => {
         transaction,
       }
     );
+
+    if (role === "dean") {
+      await replaceDeanAssignments(user.user_id, dean_course_ids, transaction);
+    }
 
     await transaction.commit();
 
@@ -488,7 +514,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       } else if (
         ["admin", "registrar"].includes(effectiveAccountType) ||
         roles.some((role) =>
-          ["dean", "college_admin", "accounting", "treasurer"].includes(role)
+          ["dean", "college_admin", "treasurer"].includes(role)
         )
       ) {
         profile = await sequelize.query(
@@ -516,7 +542,11 @@ export const registerStudent = async (req: Request, res: Response) => {
         ipAddress: req.ip,
         userAgent: req.headers["user-agent"] as string | undefined,
       });
-      const scopes = buildAuthScopes(roles, profile);
+      const scopes = buildAuthScopes(
+        roles,
+        profile,
+        await buildDeanAcademicScope(roles, user.user_id)
+      );
 
       return res.status(200).json({
         status: "success",
@@ -709,7 +739,7 @@ export const checkAuth = async (req: Request, res: Response) => {
     } else if (
       ["admin", "registrar"].includes(effectiveAccountType) ||
       roles.some((role) =>
-        ["dean", "college_admin", "accounting", "treasurer"].includes(role)
+        ["dean", "college_admin", "treasurer"].includes(role)
       )
     ) {
       const admins: any[] = await sequelize.query(
@@ -738,7 +768,11 @@ export const checkAuth = async (req: Request, res: Response) => {
       },
       roles,
       permissions,
-      scopes: buildAuthScopes(roles, profile),
+      scopes: buildAuthScopes(
+        roles,
+        profile,
+        await buildDeanAcademicScope(roles, user.user_id)
+      ),
       profile,
     });
 

@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import { sequelize, Admin as AdminProfile, User } from "../models";
 import { QueryTypes, UniqueConstraintError } from "sequelize";
+import {
+  clearDeanAssignments,
+  listDeanAssignments,
+  replaceDeanAssignments,
+} from "../services/auth/staffAssignments.service";
 
 export const getAllAdminAndRegistrarAccounts = async (
   req: Request,
@@ -11,7 +16,6 @@ export const getAllAdminAndRegistrarAccounts = async (
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
 
@@ -128,7 +132,6 @@ export const getAdminOrRegistrarById = async (
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
 
@@ -189,9 +192,26 @@ export const getAdminOrRegistrarById = async (
       });
     }
 
+    const data = result[0] as any;
+    const roles = String(data.roles || "")
+      .split(",")
+      .map((role) => role.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (roles.includes("dean")) {
+      const deanCourses = await listDeanAssignments(Number(userId));
+      data.dean_course_ids = deanCourses.map((assignment) => assignment.course_id);
+      data.dean_courses = deanCourses;
+    } else {
+      data.dean_course_ids = [];
+      data.dean_courses = [];
+    }
+
+    data.role = roles[0] || null;
+
     return res.status(200).json({
       status: "success",
-      data: result[0]
+      data,
     });
   } catch (error) {
     console.error("GET ADMIN/REGISTRAR BY ID ERROR:", error);
@@ -212,7 +232,6 @@ export const changeAdminOrRegistrarRole = async (
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
 
@@ -233,6 +252,14 @@ export const changeAdminOrRegistrarRole = async (
       return res.status(400).json({
         status: "error",
         message: `Invalid role. Allowed values: ${allowedRoles.join(", ")}`
+      });
+    }
+
+    if (role === "dean") {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Use the account editor to assign dean courses when setting the dean role",
       });
     }
 
@@ -349,7 +376,6 @@ export const changeAdminOrRegistrarStatus = async (
     "registrar",
     "dean",
     "college_admin",
-    "accounting",
     "treasurer",
   ];
 
@@ -462,7 +488,17 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       middle_name,
       last_name,
       contact_number,
+      role,
+      dean_course_ids,
     } = req.body;
+    const allowedRoles = [
+      "admin",
+      "registrar",
+      "dean",
+      "college_admin",
+      "treasurer",
+    ];
+    const hasDeanCourseIdsInput = dean_course_ids !== undefined;
 
     const normalizedEmail =
       email === undefined ? undefined : String(email).trim().toLowerCase();
@@ -480,6 +516,17 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       contact_number === undefined
         ? undefined
         : String(contact_number).trim() || null;
+    const normalizedRole =
+      role === undefined ? undefined : String(role).trim().toLowerCase();
+    const normalizedDeanCourseIds = Array.isArray(dean_course_ids)
+      ? Array.from(
+          new Set(
+            dean_course_ids
+              .map((courseId: unknown) => Number(courseId))
+              .filter((courseId: number) => Number.isInteger(courseId) && courseId > 0)
+          )
+        )
+      : [];
 
     if (
       normalizedEmail === undefined &&
@@ -487,7 +534,9 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       normalizedFirstName === undefined &&
       normalizedMiddleName === undefined &&
       normalizedLastName === undefined &&
-      normalizedContactNumber === undefined
+      normalizedContactNumber === undefined &&
+      normalizedRole === undefined &&
+      !hasDeanCourseIdsInput
     ) {
       await transaction.rollback();
       return res.status(400).json({
@@ -537,6 +586,14 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       });
     }
 
+    if (normalizedRole !== undefined && !allowedRoles.includes(normalizedRole)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: `Invalid role. Allowed values: ${allowedRoles.join(", ")}`,
+      });
+    }
+
     if (normalizedFirstName !== undefined && !normalizedFirstName) {
       await transaction.rollback();
       return res.status(400).json({
@@ -582,6 +639,34 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
         status: "error",
         message: "Admin or Registrar not found",
       });
+    }
+
+    const currentRoleRows: Array<{ role_name: string }> = await sequelize.query(
+      `
+      SELECT r.role_name
+      FROM user_roles ur
+      INNER JOIN roles r ON r.role_id = ur.role_id
+      WHERE ur.user_id = :userId
+      ORDER BY r.role_name ASC
+      `,
+      {
+        replacements: { userId: targetUserId },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    const currentRole = currentRoleRows[0]?.role_name || null;
+    const nextRole = normalizedRole ?? currentRole;
+
+    if (nextRole === "dean") {
+      if ((normalizedRole === "dean" || hasDeanCourseIdsInput) && normalizedDeanCourseIds.length === 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Select at least one course assignment for the dean role",
+        });
+      }
     }
 
     if (normalizedEmail !== undefined) {
@@ -644,6 +729,80 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
           transaction,
         }
       );
+    }
+
+    if (normalizedRole !== undefined && normalizedRole !== currentRole) {
+      const roleResult: Array<{ role_id: number }> = await sequelize.query(
+        `
+        SELECT role_id
+        FROM roles
+        WHERE role_name = :role
+        LIMIT 1
+        `,
+        {
+          replacements: { role: normalizedRole },
+          type: QueryTypes.SELECT,
+          transaction,
+        }
+      );
+
+      if (roleResult.length === 0) {
+        await transaction.rollback();
+        return res.status(404).json({
+          status: "error",
+          message: "Role not found",
+        });
+      }
+
+      await sequelize.query(
+        `
+        DELETE ur
+        FROM user_roles ur
+        INNER JOIN roles r ON r.role_id = ur.role_id
+        WHERE ur.user_id = :userId
+          AND r.role_name IN (:allowedRoles)
+        `,
+        {
+          replacements: {
+            userId: targetUserId,
+            allowedRoles,
+          },
+          type: QueryTypes.DELETE,
+          transaction,
+        }
+      );
+
+      await sequelize.query(
+        `
+        INSERT INTO user_roles (user_id, role_id, assigned_by)
+        VALUES (:userId, :roleId, :assignedBy)
+        `,
+        {
+          replacements: {
+            userId: targetUserId,
+            roleId: roleResult[0].role_id,
+            assignedBy: authUser.user_id,
+          },
+          type: QueryTypes.INSERT,
+          transaction,
+        }
+      );
+
+      await User.update(
+        {
+          account_type: normalizedRole === "registrar" ? "registrar" : "admin",
+        },
+        {
+          where: { user_id: targetUserId },
+          transaction,
+        }
+      );
+    }
+
+    if (nextRole === "dean" && hasDeanCourseIdsInput) {
+      await replaceDeanAssignments(targetUserId, normalizedDeanCourseIds, transaction);
+    } else if (nextRole !== "dean" && (currentRole === "dean" || hasDeanCourseIdsInput)) {
+      await clearDeanAssignments(targetUserId, transaction);
     }
 
     await transaction.commit();

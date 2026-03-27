@@ -22,10 +22,6 @@ export const resolveEffectiveAccountType = (
     return "college_admin";
   }
 
-  if (normalizedRoles.includes("accounting")) {
-    return "accounting";
-  }
-
   if (normalizedRoles.includes("treasurer")) {
     return "treasurer";
   }

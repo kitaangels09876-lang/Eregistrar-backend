@@ -9,7 +9,7 @@
         user_id INT AUTO_INCREMENT PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        account_type ENUM('student','alumni','admin','registrar','dean','college_admin','accounting','treasurer') NOT NULL,
+        account_type ENUM('student','alumni','admin','registrar','dean','college_admin','treasurer') NOT NULL,
         status ENUM('active','inactive') DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NULL
@@ -588,7 +588,6 @@ CREATE TABLE notifications (
     ('registrar', 'Registrar staff who manages course registrations and records'),
     ('dean', 'Academic approver limited by assigned scope'),
     ('college_admin', 'College administration reviewer limited by assigned college'),
-    ('accounting', 'Accounting user who confirms payment outcomes'),
     ('treasurer', 'Treasurer user who confirms payment outcomes');
 
     INSERT IGNORE INTO permissions (permission_key, permission_description) VALUES
@@ -604,7 +603,7 @@ CREATE TABLE notifications (
     ('approval.college_admin.approve', 'Approve college administration scoped requests'),
     ('payment.assess', 'Assess fees before payment confirmation'),
     ('payment.submit.own', 'Submit own payment proof'),
-    ('payment.confirm', 'Confirm payment as accounting or treasurer'),
+    ('payment.confirm', 'Confirm payment as treasurer'),
     ('document.prepare', 'Prepare generated registrar output'),
     ('document.generate', 'Generate final registrar output'),
     ('document.view.own.allowed', 'View own generated document when policy allows'),
@@ -686,15 +685,6 @@ CREATE TABLE notifications (
         'approval.college_admin.approve'
     )
     WHERE r.role_name = 'college_admin';
-
-    INSERT IGNORE INTO role_permissions (role_id, permission_id)
-    SELECT r.role_id, p.permission_id
-    FROM roles r
-    JOIN permissions p ON p.permission_key IN (
-        'payment.confirm',
-        'reports.view'
-    )
-    WHERE r.role_name = 'accounting';
 
     INSERT IGNORE INTO role_permissions (role_id, permission_id)
     SELECT r.role_id, p.permission_id
@@ -1028,7 +1018,6 @@ CREATE TABLE notifications (
     ('registrar@tmc.edu.ph', '$2b$10$NaE8QRn699wic3nr7AQVl.91UOWoI.jd7L5swX1zst4mUCnzqB4VS', 'registrar', 'active'),
     ('dean@tmc.edu.ph', '$2b$10$d4ChO75V9KKS5T35bsC4au3b5DS18NEQV2PSgQP9w8XrdiWJH.RSK', 'dean', 'active'),
     ('collegeadmin@tmc.edu.ph', '$2b$10$LKHRJIYDfAsbXI5Zol2FDumhg4xyx.5f4Ql0/P37a6a4T/OnLpvv2', 'college_admin', 'active'),
-    ('accounting@tmc.edu.ph', '$2b$10$u1XcNnpsZ30jaekhPHqfKOGpz3Hi5hAGifoBgJo5A00ClcWw/ROlO', 'accounting', 'active'),
     ('treasurer@tmc.edu.ph', '$2b$10$rs89aL.8RjQu86ycypCEvuMPCGzrFz9O0AjvCXQDYCRSXmYYhJIKu', 'treasurer', 'active'),
     ('student@tmc.edu.ph', '$2b$10$w38ZrRYzw0UkpcHzPtVbLu9CM1kW5cHG5d.kdXnL9qpV8heAGPK1e', 'student', 'active'),
     ('alumni@tmc.edu.ph', '$2b$10$c5ocrXofbiCovGmvIxtjFuLEqBiFlU..ycByvqhXyS3t6Rvn7osOa', 'alumni', 'active'),
@@ -1053,7 +1042,6 @@ CREATE TABLE notifications (
         WHEN u.email IN ('registrar@tmc.edu.ph', 'iris.lloren@tmc.edu.ph') THEN 'registrar'
         WHEN u.email IN ('dean@tmc.edu.ph', 'clark.villamor@tmc.edu.ph', 'marina.polestico@tmc.edu.ph', 'elmira.negro@tmc.edu.ph', 'judith.austria@tmc.edu.ph', 'antonette.nugal@tmc.edu.ph') THEN 'dean'
         WHEN u.email IN ('collegeadmin@tmc.edu.ph', 'julie.maestrado@tmc.edu.ph') THEN 'college_admin'
-        WHEN u.email = 'accounting@tmc.edu.ph' THEN 'accounting'
         WHEN u.email = 'treasurer@tmc.edu.ph' THEN 'treasurer'
         WHEN u.email = 'student@tmc.edu.ph' THEN 'student'
         WHEN u.email = 'alumni@tmc.edu.ph' THEN 'alumni'
@@ -1064,7 +1052,6 @@ CREATE TABLE notifications (
       'registrar@tmc.edu.ph',
       'dean@tmc.edu.ph',
       'collegeadmin@tmc.edu.ph',
-      'accounting@tmc.edu.ph',
       'treasurer@tmc.edu.ph',
       'student@tmc.edu.ph',
       'alumni@tmc.edu.ph',
@@ -1098,7 +1085,6 @@ CREATE TABLE notifications (
       UNION ALL SELECT 'registrar@tmc.edu.ph', 'Rina', NULL, 'Registrar', '09170000002'
       UNION ALL SELECT 'dean@tmc.edu.ph', 'Dario', NULL, 'Dean', '09170000003'
       UNION ALL SELECT 'collegeadmin@tmc.edu.ph', 'Celia', NULL, 'Administrator', '09170000004'
-      UNION ALL SELECT 'accounting@tmc.edu.ph', 'Ana', NULL, 'Accounting', '09170000005'
       UNION ALL SELECT 'treasurer@tmc.edu.ph', 'Teresa', NULL, 'Treasurer', '09170000006'
       UNION ALL SELECT 'clark.villamor@tmc.edu.ph', 'Clark', 'Kevin V.', 'Villamor', '09170000007'
       UNION ALL SELECT 'marina.polestico@tmc.edu.ph', 'Marina', 'C.', 'Polestico', '09170000008'
