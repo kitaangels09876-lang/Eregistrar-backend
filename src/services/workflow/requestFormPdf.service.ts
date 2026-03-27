@@ -5,10 +5,17 @@ import { QueryTypes } from "sequelize";
 import { sequelize } from "../../models";
 
 type RequestItem = {
+  document_type_id?: number;
   document_name: string;
   quantity: number;
   base_price: number;
   final_price: number;
+};
+
+type CatalogItem = {
+  document_type_id: number;
+  document_name: string;
+  base_price: number;
 };
 
 type WorkflowRequestForPdf = {
@@ -27,8 +34,8 @@ type WorkflowRequestForPdf = {
   items: RequestItem[];
 };
 
-const PAGE_WIDTH = 595.28;
-const PAGE_HEIGHT = 841.89;
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 1008;
 const LEFT = 42;
 const RIGHT = PAGE_WIDTH - 42;
 const DEFAULT_SCHOOL_NAME = "TRINIDAD MUNICIPAL COLLEGE";
@@ -284,18 +291,248 @@ const inferDocumentGroup = (documentName: string) => {
   return "RECORDS REQUESTED";
 };
 
-const groupItems = (items: RequestItem[]) => {
+const dedupeRequestItems = (items: RequestItem[]) => {
+  const seen = new Set<string>();
+
+  return items.filter((item) => {
+    const key = `${item.document_type_id || ""}:${upper(item.document_name)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
+const groupItems = (items: Array<RequestItem | CatalogItem>) => {
   const grouped: Record<string, RequestItem[]> = {
     "RECORDS REQUESTED": [],
     CERTIFICATIONS: [],
     "PRINTING SERVICES": [],
   };
 
-  for (const item of items) {
-    grouped[inferDocumentGroup(item.document_name)].push(item);
+  for (const item of items as RequestItem[]) {
+    grouped[inferDocumentGroup(item.document_name)].push(item as RequestItem);
   }
 
   return grouped;
+};
+
+const loadDocumentCatalog = async (): Promise<CatalogItem[]> => {
+  const rows = await sequelize.query<CatalogItem>(
+    `
+    SELECT
+      document_type_id,
+      document_name,
+      base_price
+    FROM document_types
+    WHERE is_active = 1
+    ORDER BY document_name ASC
+    `,
+    {
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return rows;
+};
+
+const normalizeEducationBackground = (entries: Array<Record<string, any>> = []) => {
+  const levels = [
+    "primary",
+    "elementary",
+    "junior_high_school",
+    "senior_high_school",
+  ] as const;
+
+  return levels.map((level) => {
+    const match = entries.find((entry) => entry?.level === level) || {};
+    return {
+      level,
+      school_name: upper(match.school_name),
+      school_address: upper(match.school_address),
+      year_graduated: upper(match.year_graduated),
+    };
+  });
+};
+
+const buildRequestedDocumentLabel = (items: RequestItem[]) =>
+  dedupeRequestItems(items)
+    .map((item) => upper(item.document_name))
+    .filter(Boolean)
+    .join(", ");
+
+const createEditableFieldWriter = (doc: PDFKit.PDFDocument) => {
+  let fieldIndex = 0;
+
+  return (
+    options: {
+      namePrefix: string;
+      label: string;
+      value: string;
+      x: number;
+      y: number;
+      width: number;
+      labelWidth?: number;
+      maxLines?: number;
+      baseFontSize?: number;
+      minFontSize?: number;
+      align?: "left" | "center" | "right";
+    }
+  ) => {
+    const {
+      namePrefix,
+      label,
+      value,
+      x,
+      y,
+      width,
+      labelWidth,
+      maxLines = 1,
+      baseFontSize = 9,
+      minFontSize = 6,
+      align = "left",
+    } = options;
+
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#111111").text(label, x, y + 2);
+    const resolvedLabelWidth = labelWidth ?? doc.widthOfString(label) + 6;
+    const fieldX = x + resolvedLabelWidth;
+    const fieldWidth = Math.max(width - resolvedLabelWidth, 40);
+    const fitted = fitTextBlock(doc, value || " ", fieldWidth - 8, {
+      baseFontSize,
+      minFontSize,
+      maxLines,
+      lineGap: 0,
+    });
+    const fieldHeight = Math.max(
+      maxLines > 1 ? 18 : 11,
+      Math.ceil(fitted.height + 3)
+    );
+    const underlineY = y + fieldHeight + 2;
+
+    doc.font("Helvetica");
+    doc.formText(
+      `${namePrefix}_${fieldIndex++}`,
+      fieldX,
+      y,
+      fieldWidth,
+      fieldHeight,
+      {
+        value: value || "",
+        fontSize: fitted.fontSize,
+        multiline: maxLines > 1,
+        align,
+      }
+    );
+    strokeFieldLine(doc, fieldX, underlineY, fieldWidth);
+
+    return underlineY - y + 4;
+  };
+};
+
+const drawEditableNameColumns = (
+  doc: PDFKit.PDFDocument,
+  writeField: ReturnType<typeof createEditableFieldWriter>,
+  options: {
+    familyName: string;
+    firstName: string;
+    middleName: string;
+    y: number;
+  }
+) => {
+  const { familyName, firstName, middleName, y } = options;
+
+  doc.font("Helvetica-Bold").fontSize(8.5).text("Name:", LEFT, y + 2);
+
+  const startX = LEFT + 44;
+  const totalWidth = RIGHT - startX;
+  const familyWidth = 198;
+  const firstWidth = 150;
+  const middleWidth = totalWidth - familyWidth - firstWidth - 12;
+
+  writeField({
+    namePrefix: "family_name",
+    label: "",
+    value: familyName,
+    x: startX,
+    y,
+    width: familyWidth,
+    baseFontSize: 8.5,
+    minFontSize: 6,
+    align: "center",
+    labelWidth: 0,
+  });
+  writeField({
+    namePrefix: "first_name",
+    label: "",
+    value: firstName,
+    x: startX + familyWidth + 6,
+    y,
+    width: firstWidth,
+    baseFontSize: 8.5,
+    minFontSize: 6,
+    align: "center",
+    labelWidth: 0,
+  });
+  writeField({
+    namePrefix: "middle_name",
+    label: "",
+    value: middleName,
+    x: startX + familyWidth + firstWidth + 12,
+    y,
+    width: middleWidth,
+    baseFontSize: 8.5,
+    minFontSize: 6,
+    align: "center",
+    labelWidth: 0,
+  });
+
+  doc.font("Helvetica").fontSize(7.5).fillColor("#333333").text("Family Name", startX, y + 16, {
+    width: familyWidth,
+    align: "center",
+  });
+  doc.text("First Name", startX + familyWidth + 6, y + 16, {
+    width: firstWidth,
+    align: "center",
+  });
+  doc.text("Middle Name", startX + familyWidth + firstWidth + 12, y + 16, {
+    width: middleWidth,
+    align: "center",
+  });
+  doc.fillColor("#111111");
+};
+
+const drawCatalogDocumentSection = (
+  doc: PDFKit.PDFDocument,
+  title: string,
+  items: CatalogItem[],
+  selectedIds: Set<number>,
+  y: number
+) => {
+  doc.font("Helvetica-Bold").fontSize(9).text(title, LEFT + 14, y);
+  let currentY = y + 16;
+
+  for (const item of items) {
+    const checked = selectedIds.has(Number(item.document_type_id));
+    drawCheckbox(doc, LEFT + 16, currentY + 1, checked);
+    const itemName = fitTextBlock(doc, upper(item.document_name), 320, {
+      baseFontSize: 8.5,
+      minFontSize: 6,
+      maxLines: 2,
+    });
+    doc.font("Helvetica").fontSize(itemName.fontSize).text(itemName.text, LEFT + 34, currentY, {
+      width: 320,
+      lineGap: itemName.lineGap,
+    });
+    doc.text(formatMoney(item.base_price), RIGHT - 78, currentY, {
+      width: 58,
+      align: "right",
+    });
+    currentY += Math.max(13, itemName.height + 2);
+  }
+
+  return currentY + 8;
 };
 
 const drawFallbackHeaderLogo = (doc: PDFKit.PDFDocument) => {
@@ -495,15 +732,29 @@ export const generateRequestFormPdf = async (
   const absolutePath = path.join(uploadsDir, fileName);
   const relativePath = `/uploads/workflow/forms/${fileName}`;
   const branding = await getSchoolBranding();
+  const uniqueItems = dedupeRequestItems(request.items || []);
+  const groupedCatalog = groupItems(await loadDocumentCatalog()) as Record<
+    string,
+    CatalogItem[]
+  >;
+  const requestedDocumentLabel = buildRequestedDocumentLabel(uniqueItems);
+  const educationEntries = normalizeEducationBackground(request.educational_background || []);
+  const selectedDocumentIds = new Set(
+    uniqueItems
+      .map((item) => Number(item.document_type_id))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  );
 
   await new Promise<void>((resolve, reject) => {
     const doc = new PDFDocument({
-      size: "A4",
-      margins: { top: 30, left: LEFT, right: 42, bottom: 30 },
+      size: "LEGAL",
+      margins: { top: 24, left: LEFT, right: 42, bottom: 30 },
     });
 
     const stream = fs.createWriteStream(absolutePath);
     doc.pipe(stream);
+    doc.font("Times-Roman");
+    doc.initForm();
 
     const form = request.form_snapshot || {};
     const academic = request.academic_snapshot || {};
@@ -511,25 +762,25 @@ export const generateRequestFormPdf = async (
     const fee = request.fee_snapshot || {};
     const payment = request.payment_snapshot || {};
     const release = request.release_snapshot || {};
-    const groupedItems = groupItems(request.items || []);
+    const writeField = createEditableFieldWriter(doc);
 
     const fullName =
       upper(academic.full_name) ||
       [
+        upper(academic.last_name),
         upper(academic.first_name),
         upper(academic.middle_name),
-        upper(academic.last_name),
         upper(academic.extension_name),
       ]
         .filter(Boolean)
-        .join(" ");
+        .join(", ");
 
     drawHeader(doc, branding);
     doc
       .font("Helvetica-Bold")
-      .fontSize(9)
-      .text("BASIC INFORMATION (PLEASE FILL UP IN CAPITAL LETTER, WRITE LEGIBLY)", LEFT + 55, 116, {
-        width: 390,
+      .fontSize(8)
+      .text("BASIC INFORMATION (PLEASE FILL UP IN CAPITAL LETTER, WRITE LEGIBLY)", LEFT + 40, 114, {
+        width: RIGHT - LEFT - 80,
         align: "center",
       });
 
@@ -541,116 +792,278 @@ export const generateRequestFormPdf = async (
     );
     doc.fillColor("#111111");
 
-    let y = 140;
-    y += drawLabeledLine(doc, { label: "NAME:", value: fullName, x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "CIVIL STATUS:", value: upper(form.civil_status), x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "GENDER:", value: upper(form.gender), x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "CONTACT NUMBER:", value: upper(form.contact_number), x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "ADDRESS:", value: upper(form.address_line), x: LEFT + 18, y, width: 470, maxLines: 2 });
-    y += drawLabeledLine(doc, { label: "PUROK:", value: upper(form.purok), x: LEFT + 46, y, width: 442 });
-    y += drawLabeledLine(doc, { label: "BARANGAY:", value: upper(form.barangay), x: LEFT + 46, y, width: 442, maxLines: 2 });
-    y += drawLabeledLine(doc, { label: "MUNICIPALITY:", value: upper(form.municipality), x: LEFT + 46, y, width: 442, maxLines: 2 });
-    y += drawLabeledLine(doc, { label: "PROVINCE:", value: upper(form.province), x: LEFT + 46, y, width: 442 });
-    y += drawLabeledLine(doc, { label: "ACADEMIC YEAR:", value: upper(form.academic_year_label), x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "PLACE OF BIRTH:", value: upper(form.place_of_birth), x: LEFT + 18, y, width: 470, maxLines: 2 });
-    y += drawLabeledLine(doc, { label: "DATE OF BIRTH:", value: safeDate(form.date_of_birth), x: LEFT + 18, y, width: 470 });
-    y += drawLabeledLine(doc, { label: "GUARDIAN:", value: upper(form.guardian_name), x: LEFT + 18, y, width: 470, maxLines: 2 });
-    y += drawLabeledLine(
-      doc,
-      {
-        label: "TYPE OF RECORD TO BE CLAIM:",
-        value: request.items.map((item) => upper(item.document_name)).join(", "),
-        x: LEFT + 18,
-        y,
-        width: 470,
-        maxLines: 2,
-      }
-    );
-    y += drawLabeledLine(doc, { label: "PURPOSE:", value: upper(request.purpose), x: LEFT + 18, y, width: 470, maxLines: 2 });
+    let y = 136;
+    y += writeField({
+      namePrefix: "basic_name",
+      label: "NAME:",
+      value: fullName,
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "civil_status",
+      label: "CIVIL STATUS:",
+      value: upper(form.civil_status),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "gender",
+      label: "GENDER:",
+      value: upper(form.gender),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "contact_number",
+      label: "CONTACT NUMBER:",
+      value: upper(form.contact_number),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "address_line",
+      label: "ADDRESS:",
+      value: upper(form.address_line),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "purok",
+      label: "PUROK:",
+      value: upper(form.purok),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "barangay",
+      label: "BARANGAY:",
+      value: upper(form.barangay),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "municipality",
+      label: "MUNICIPALITY:",
+      value: upper(form.municipality),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "province",
+      label: "PROVINCE:",
+      value: upper(form.province),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "academic_year_label",
+      label: "ACADEMIC YEAR:",
+      value: upper(form.academic_year_label),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "place_of_birth",
+      label: "PLACE OF BIRTH:",
+      value: upper(form.place_of_birth),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "date_of_birth",
+      label: "DATE OF BIRTH:",
+      value: safeDate(form.date_of_birth),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "type_of_record",
+      label: "TYPE OF RECORD TO BE CLAIM:",
+      value: requestedDocumentLabel,
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 3,
+      baseFontSize: 8.5,
+    });
+    y += writeField({
+      namePrefix: "purpose_page_1",
+      label: "PURPOSE:",
+      value: upper(request.purpose),
+      x: LEFT + 18,
+      y,
+      width: 490,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
 
-    y += 32;
+    y += 16;
     drawSectionTitle(doc, "EDUCATIONAL BACK GROUND", y);
-    y += 22;
+    y += 18;
 
     const levels = [
       { key: "primary", label: "PRIMARY:" },
-      { key: "elementary", label: "ELEMENTARY" },
-      { key: "junior_high_school", label: "JUNIOR HIGH SCHOOL" },
-      { key: "senior_high_school", label: "SENIOR HIGH SCHOOL" },
-    ];
+      { key: "elementary", label: "ELEMENTARY:" },
+      { key: "junior_high_school", label: "JUNIOR HIGH SCHOOL:" },
+      { key: "senior_high_school", label: "SENIOR HIGH SCHOOL:" },
+    ] as const;
 
     for (const level of levels) {
       const entry =
-        request.educational_background.find((item) => item.level === level.key) || {};
+        educationEntries.find((item) => item.level === level.key) || educationEntries[0];
 
-      doc.font("Helvetica-Bold").fontSize(9).text(level.label, LEFT + 46, y);
-      y += 14;
-      y += drawLabeledLine(doc, { label: "NAME OF SCHOOL:", value: upper(entry.school_name), x: LEFT + 40, y, width: 445, maxLines: 2 });
-      y += drawLabeledLine(doc, { label: "ADDRESS OF SCHOOL:", value: upper(entry.school_address), x: LEFT + 40, y, width: 445, maxLines: 2 });
-      y += drawLabeledLine(doc, { label: "YEAR GRADUATED:", value: upper(entry.year_graduated), x: LEFT + 40, y, width: 445 });
-      y += 22;
+      doc.font("Helvetica-Bold").fontSize(8.5).text(level.label, LEFT + 40, y);
+      y += 10;
+      y += writeField({
+        namePrefix: `${level.key}_school_name`,
+        label: "NAME OF SCHOOL:",
+        value: entry.school_name,
+        x: LEFT + 40,
+        y,
+        width: 450,
+        maxLines: 2,
+        baseFontSize: 8,
+      });
+      y += writeField({
+        namePrefix: `${level.key}_school_address`,
+        label: "ADDRESS OF SCHOOL:",
+        value: entry.school_address,
+        x: LEFT + 40,
+        y,
+        width: 450,
+        maxLines: 2,
+        baseFontSize: 8,
+      });
+      y += writeField({
+        namePrefix: `${level.key}_year_graduated`,
+        label: "YEAR GRADUATED:",
+        value: entry.year_graduated,
+        x: LEFT + 40,
+        y,
+        width: 450,
+        baseFontSize: 8,
+      });
+      y += 6;
     }
 
-    doc.addPage();
+    doc.addPage({
+      size: "LEGAL",
+      margins: { top: 24, left: LEFT, right: 42, bottom: 30 },
+    });
     drawHeader(doc, branding);
     doc.font("Helvetica-Bold").fontSize(15).text("REQUEST FORM", 0, 104, {
       width: PAGE_WIDTH,
       align: "center",
     });
 
-    y = 135;
-    drawNameColumns(doc, {
+    y = 136;
+    drawEditableNameColumns(doc, writeField, {
       familyName: upper(academic.last_name),
       firstName: upper(academic.first_name),
       middleName: upper(academic.middle_name),
       y,
     });
 
-    y += 36;
+    y += 34;
     const graduationRowHeight = Math.max(
-      drawLabeledLine(doc, {
-      label: "Course Graduated:",
-      value: upper(academic.course_name || form.course_text),
-      x: LEFT + 18,
-      y,
-      width: 300,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "Academic Year:",
-      value: upper(form.academic_year_label),
-      x: LEFT + 330,
-      y,
-      width: 170,
+      writeField({
+        namePrefix: "course_graduated",
+        label: "Course Graduated:",
+        value: upper(academic.course_name || form.course_text),
+        x: LEFT + 18,
+        y,
+        width: 302,
+        maxLines: 2,
+        baseFontSize: 8.5,
+      }),
+      writeField({
+        namePrefix: "course_academic_year",
+        label: "Academic Year:",
+        value: upper(form.academic_year_label),
+        x: LEFT + 332,
+        y,
+        width: 170,
+        baseFontSize: 8.5,
       })
     );
 
     y += graduationRowHeight;
     const semesterRowHeight = Math.max(
-      drawLabeledLine(doc, {
-      label: "Last Semester Attended if Undergraduate:",
-      value: upper(form.last_semester_attended),
-      x: LEFT + 18,
-      y,
-      width: 300,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "Academic Year:",
-      value: upper(form.academic_year_label),
-      x: LEFT + 330,
-      y,
-      width: 170,
+      writeField({
+        namePrefix: "last_semester_attended",
+        label: "Last Semester Attended if Undergraduate:",
+        value: upper(form.last_semester_attended),
+        x: LEFT + 18,
+        y,
+        width: 302,
+        maxLines: 2,
+        baseFontSize: 8.5,
+      }),
+      writeField({
+        namePrefix: "semester_academic_year",
+        label: "Academic Year:",
+        value: upper(form.academic_year_label),
+        x: LEFT + 332,
+        y,
+        width: 170,
+        baseFontSize: 8.5,
       })
     );
 
     y += semesterRowHeight + 10;
-    doc.font("Helvetica-Bold").fontSize(9).text("Please Checked type of Records Requested:", LEFT + 18, y);
+    doc.font("Helvetica-Bold").fontSize(8.5).text("Please Checked type of Records Requested:", LEFT + 18, y);
     y += 18;
 
-    y = drawDocumentSection(doc, "RECORDS REQUESTED", groupedItems["RECORDS REQUESTED"], y);
-    y = drawDocumentSection(doc, "CERTIFICATIONS", groupedItems.CERTIFICATIONS, y);
-    y = drawDocumentSection(doc, "PRINTING SERVICES", groupedItems["PRINTING SERVICES"], y);
+    y = drawCatalogDocumentSection(
+      doc,
+      "RECORDS REQUESTED",
+      groupedCatalog["RECORDS REQUESTED"] || [],
+      selectedDocumentIds,
+      y
+    );
+    y = drawCatalogDocumentSection(
+      doc,
+      "CERTIFICATIONS",
+      groupedCatalog.CERTIFICATIONS || [],
+      selectedDocumentIds,
+      y
+    );
+    y = drawCatalogDocumentSection(
+      doc,
+      "PRINTING SERVICES",
+      groupedCatalog["PRINTING SERVICES"] || [],
+      selectedDocumentIds,
+      y
+    );
 
     y += 10;
     doc.font("Helvetica-Bold").fontSize(9).text("Approved by:", LEFT + 18, y);
@@ -695,20 +1108,24 @@ export const generateRequestFormPdf = async (
 
     y += 6;
     const releaseMetaRowHeight = Math.max(
-      drawLabeledLine(doc, {
-      label: "Purpose:",
-      value: upper(request.purpose),
-      x: LEFT + 18,
-      y,
-      width: 210,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "Date of Released:",
-      value: safeDate(release.date_released),
-      x: LEFT + 245,
-      y,
-      width: 240,
+      writeField({
+        namePrefix: "purpose_page_2",
+        label: "Purpose:",
+        value: upper(request.purpose),
+        x: LEFT + 18,
+        y,
+        width: 210,
+        maxLines: 2,
+        baseFontSize: 8.5,
+      }),
+      writeField({
+        namePrefix: "date_of_released",
+        label: "Date of Released:",
+        value: safeDate(release.date_released),
+        x: LEFT + 245,
+        y,
+        width: 240,
+        baseFontSize: 8.5,
       })
     );
 
@@ -722,63 +1139,77 @@ export const generateRequestFormPdf = async (
 
     y += 20;
     const claimHeaderRowHeight = Math.max(
-      drawLabeledLine(doc, {
-      label: "Name:",
-      value: fullName,
-      x: LEFT + 18,
-      y,
-      width: 180,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "Course:",
-      value: upper(academic.course_name || form.course_text),
-      x: LEFT + 205,
-      y,
-      width: 190,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "ID No.:",
-      value: upper(academic.student_number),
-      x: LEFT + 402,
-      y,
-      width: 85,
+      writeField({
+        namePrefix: "claim_name",
+        label: "Name:",
+        value: fullName,
+        x: LEFT + 18,
+        y,
+        width: 180,
+        maxLines: 2,
+        baseFontSize: 8,
+      }),
+      writeField({
+        namePrefix: "claim_course",
+        label: "Course:",
+        value: upper(academic.course_name || form.course_text),
+        x: LEFT + 205,
+        y,
+        width: 190,
+        maxLines: 2,
+        baseFontSize: 8,
+      }),
+      writeField({
+        namePrefix: "claim_id_no",
+        label: "ID No.:",
+        value: upper(academic.student_number),
+        x: LEFT + 402,
+        y,
+        width: 85,
+        baseFontSize: 8,
       })
     );
 
     y += claimHeaderRowHeight;
-    y += drawLabeledLine(doc, {
+    y += writeField({
+      namePrefix: "claim_type_of_record",
       label: "Type of Record to be Claim:",
-      value: request.items.map((item) => upper(item.document_name)).join(", "),
+      value: requestedDocumentLabel,
       x: LEFT + 18,
       y,
       width: 470,
-      maxLines: 2,
+      maxLines: 3,
+      baseFontSize: 8,
     });
 
     const claimMetaRowHeight = Math.max(
-      drawLabeledLine(doc, {
-      label: "Request by:",
-      value: fullName,
-      x: LEFT + 18,
-      y,
-      width: 205,
-      maxLines: 2,
-    }),
-      drawLabeledLine(doc, {
-      label: "Date:",
-      value: safeDate(request.submitted_at),
-      x: LEFT + 232,
-      y,
-      width: 105,
+      writeField({
+        namePrefix: "claim_requested_by",
+        label: "Request by:",
+        value: fullName,
+        x: LEFT + 18,
+        y,
+        width: 205,
+        maxLines: 2,
+        baseFontSize: 8,
       }),
-      drawLabeledLine(doc, {
-      label: "Expected Date of Released:",
-      value: safeDate(release.expected_release_date),
-      x: LEFT + 344,
-      y,
-      width: 145,
+      writeField({
+        namePrefix: "claim_date",
+        label: "Date:",
+        value: safeDate(request.submitted_at),
+        x: LEFT + 232,
+        y,
+        width: 105,
+        baseFontSize: 8,
+      }),
+      writeField({
+        namePrefix: "claim_expected_release",
+        label: "Expected Date of Released:",
+        value: safeDate(release.expected_release_date),
+        x: LEFT + 344,
+        y,
+        width: 145,
+        baseFontSize: 8,
       })
     );
 
@@ -789,16 +1220,6 @@ export const generateRequestFormPdf = async (
       doc.font("Helvetica").fontSize(9).text(`${index + 1}.`, itemX, y + 14);
       strokeFieldLine(doc, itemX + 16, y + 25, 90);
     }
-
-    y += 38;
-    doc.font("Helvetica").fontSize(8).fillColor("#444444").text(
-      `SYSTEM STATUS: ${upper(request.current_status)}    PAYMENT: ${upper(
-        payment.payment_status || "PENDING"
-      )}    FINAL FEE: ${formatMoney(fee.final_fee ?? fee.assessed_fee)}`,
-      LEFT + 18,
-      y,
-      { width: 470, align: "left" }
-    );
 
     doc.end();
 

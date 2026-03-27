@@ -77,7 +77,7 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
   UNDER_COLLEGE_ADMIN_REVIEW: ["approval.dean.approve"],
   COLLEGE_ADMIN_APPROVED: ["approval.college_admin.approve"],
   FEE_ASSESSED: ["payment.assess"],
-  AWAITING_PAYMENT: ["payment.assess"],
+  AWAITING_PAYMENT: ["payment.assess", "approval.college_admin.approve"],
   PAYMENT_SUBMITTED: ["payment.submit.own"],
   PAYMENT_CONFIRMED: ["payment.confirm"],
   UNDER_REGISTRAR_PROCESSING: ["payment.confirm"],
@@ -100,7 +100,7 @@ const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
   UNDER_COLLEGE_ADMIN_REVIEW: ["dean", "admin"],
   COLLEGE_ADMIN_APPROVED: ["college_admin", "admin"],
   FEE_ASSESSED: ["registrar", "admin"],
-  AWAITING_PAYMENT: ["registrar", "admin"],
+  AWAITING_PAYMENT: ["registrar", "college_admin", "admin"],
   PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
   PAYMENT_CONFIRMED: ["treasurer", "admin"],
   UNDER_REGISTRAR_PROCESSING: ["treasurer", "admin"],
@@ -193,6 +193,145 @@ const createWorkflowNotification = async ({
     type: "request_update",
     status,
   });
+};
+
+const AUTO_PAYMENT_TRANSITION_DELAY_SECONDS = 60;
+
+const promoteCollegeAdminApprovedRequests = async (
+  workflowRequestId?: number
+) => {
+  const rows: Array<{
+    workflow_request_id: number;
+    student_user_id: number | null;
+    request_reference: string;
+    fee_snapshot_json: any;
+    payment_snapshot_json: any;
+    approval_snapshot_json: any;
+    default_fee: number | string | null;
+  }> = await sequelize.query(
+    `
+    SELECT
+      wr.workflow_request_id,
+      wr.student_user_id,
+      wr.request_reference,
+      wr.fee_snapshot_json,
+      wr.payment_snapshot_json,
+      wr.approval_snapshot_json,
+      COALESCE(SUM(COALESCE(wri.final_price, wri.base_price, 0)), 0) AS default_fee
+    FROM workflow_requests wr
+    LEFT JOIN workflow_request_items wri ON wri.workflow_request_id = wr.workflow_request_id
+    WHERE wr.current_status = 'COLLEGE_ADMIN_APPROVED'
+      AND TIMESTAMPDIFF(SECOND, wr.updated_at, NOW()) >= :delaySeconds
+      ${workflowRequestId ? "AND wr.workflow_request_id = :workflowRequestId" : ""}
+    GROUP BY
+      wr.workflow_request_id,
+      wr.student_user_id,
+      wr.request_reference,
+      wr.fee_snapshot_json,
+      wr.payment_snapshot_json,
+      wr.approval_snapshot_json
+    `,
+    {
+      replacements: {
+        delaySeconds: AUTO_PAYMENT_TRANSITION_DELAY_SECONDS,
+        ...(workflowRequestId ? { workflowRequestId } : {}),
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  for (const row of rows) {
+    const feeSnapshot = parseJsonField<Record<string, any>>(row.fee_snapshot_json, {});
+    const paymentSnapshot = parseJsonField<Record<string, any>>(
+      row.payment_snapshot_json,
+      {}
+    );
+    const approvalSnapshot = parseJsonField<Record<string, any>>(
+      row.approval_snapshot_json,
+      {}
+    );
+    const defaultFee = Number(row.default_fee || 0);
+    const assessedAt =
+      approvalSnapshot.college_admin_approved_at || new Date().toISOString();
+
+    feeSnapshot.assessed_by_role = feeSnapshot.assessed_by_role || "college_admin";
+    feeSnapshot.assessed_fee = feeSnapshot.assessed_fee ?? defaultFee;
+    feeSnapshot.final_fee =
+      feeSnapshot.final_fee ?? feeSnapshot.assessed_fee ?? defaultFee;
+    feeSnapshot.assessed_at = feeSnapshot.assessed_at || assessedAt;
+    feeSnapshot.notes = feeSnapshot.notes || "Auto-routed to payment after college administration approval.";
+
+    paymentSnapshot.payment_status = "AWAITING_PAYMENT";
+
+    await sequelize.transaction(async (transaction) => {
+      await sequelize.query(
+        `
+        UPDATE workflow_requests
+        SET
+          current_status = 'AWAITING_PAYMENT',
+          fee_snapshot_json = :feeSnapshot,
+          payment_snapshot_json = :paymentSnapshot
+        WHERE workflow_request_id = :workflowRequestId
+          AND current_status = 'COLLEGE_ADMIN_APPROVED'
+        `,
+        {
+          replacements: {
+            workflowRequestId: row.workflow_request_id,
+            feeSnapshot: JSON.stringify(feeSnapshot),
+            paymentSnapshot: JSON.stringify(paymentSnapshot),
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+
+      await sequelize.query(
+        `
+        INSERT INTO workflow_request_actions (
+          workflow_request_id,
+          action_role,
+          action_type,
+          from_status,
+          to_status,
+          remarks,
+          payload_json,
+          acted_by_user_id,
+          acted_at
+        ) VALUES (
+          :workflowRequestId,
+          'system',
+          'AUTO_ADVANCE_STATUS',
+          'COLLEGE_ADMIN_APPROVED',
+          'AWAITING_PAYMENT',
+          :remarks,
+          :payload,
+          NULL,
+          NOW()
+        )
+        `,
+        {
+          replacements: {
+            workflowRequestId: row.workflow_request_id,
+            remarks:
+              "Automatically routed to payment 1 minute after college administration approval.",
+            payload: JSON.stringify({
+              auto_transition: true,
+              delay_seconds: AUTO_PAYMENT_TRANSITION_DELAY_SECONDS,
+            }),
+          },
+          transaction,
+          type: QueryTypes.INSERT,
+        }
+      );
+    });
+
+    await createWorkflowNotification({
+      userId: row.student_user_id,
+      title: "Payment is now available",
+      message: `Request ${row.request_reference} is now awaiting payment submission.`,
+      status: "AWAITING_PAYMENT",
+    });
+  }
 };
 
 const insertApprovalRecord = async ({
@@ -2224,6 +2363,7 @@ export const listWorkflowRequests = async (
   }
 ) => {
   await ensureWorkflowSchema();
+  await promoteCollegeAdminApprovedRequests();
 
   const roles = getRoleNames(user);
   const whereClauses: string[] = [];
@@ -2495,6 +2635,7 @@ export const getWorkflowRequestDetail = async (
   user: AuthUser
 ) => {
   await ensureWorkflowSchema();
+  await promoteCollegeAdminApprovedRequests(workflowRequestId);
 
   const detail = await getRequestDetailInternal(workflowRequestId);
   const roles = getRoleNames(user);
@@ -2650,6 +2791,28 @@ export const advanceWorkflowRequest = async (
       defaultAssessedFee;
     feeSnapshot.assessed_at = new Date().toISOString();
     feeSnapshot.notes = remarks;
+  }
+
+  if (body.target_status === "AWAITING_PAYMENT") {
+    const defaultAssessedFee = detail.items.reduce(
+      (sum: number, item: any) => sum + Number(item.final_price ?? item.base_price ?? 0),
+      0
+    );
+
+    feeSnapshot.assessed_by_role =
+      feeSnapshot.assessed_by_role || getPrimaryRole(user);
+    feeSnapshot.assessed_fee =
+      updates.assessed_fee ?? feeSnapshot.assessed_fee ?? defaultAssessedFee;
+    feeSnapshot.final_fee =
+      updates.final_fee ??
+      feeSnapshot.final_fee ??
+      feeSnapshot.assessed_fee ??
+      defaultAssessedFee;
+    feeSnapshot.assessed_at =
+      feeSnapshot.assessed_at || new Date().toISOString();
+    feeSnapshot.notes = remarks || feeSnapshot.notes || null;
+
+    paymentSnapshot.payment_status = "AWAITING_PAYMENT";
   }
 
   if (body.target_status === "PAYMENT_SUBMITTED") {
