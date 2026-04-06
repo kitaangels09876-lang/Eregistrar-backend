@@ -2016,17 +2016,55 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   }
 
   const requiredFieldChecks: Array<[string, string | null | undefined]> = [
-    ["civil_status", payload.civil_status],
-    ["gender", payload.gender],
-    ["contact_number", payload.contact_number],
-    ["address_line", payload.address_line],
-    ["academic_year_label", payload.academic_year_label],
-    ["purpose", payload.purpose],
+    ["Civil Status", payload.civil_status],
+    ["Gender", payload.gender],
+    ["Contact Number", payload.contact_number],
+    ["Purok", payload.purok],
+    ["Barangay", payload.barangay],
+    ["Municipality", payload.municipality],
+    ["Province", payload.province],
+    ["Academic Year", payload.academic_year_label],
+    ["Place of Birth", payload.place_of_birth],
+    ["Date of Birth", payload.date_of_birth],
+    ["Guardian", payload.guardian_name],
+    ["Last Semester Attended", payload.last_semester_attended],
+    ["Purpose", payload.purpose],
   ];
 
   for (const [field, value] of requiredFieldChecks) {
     if (!String(value || "").trim()) {
-      throw new Error(`Field ${field} is required`);
+      throw new Error(`${field} is required`);
+    }
+  }
+
+  const educationLabels: Record<string, string> = {
+    primary: "Primary",
+    elementary: "Elementary",
+    junior_high_school: "Junior High School",
+    senior_high_school: "Senior High School",
+  };
+  const requiredEducationFields: Array<
+    ["school_name" | "school_address" | "year_graduated", string]
+  > = [
+    ["school_name", "School Name"],
+    ["school_address", "School Address"],
+    ["year_graduated", "Year Graduated"],
+  ];
+  const educationEntries = Array.isArray(payload.educational_background)
+    ? payload.educational_background
+    : [];
+
+  for (const [level, label] of Object.entries(educationLabels)) {
+    const entry = educationEntries.find((item) => item?.level === level);
+
+    if (!entry) {
+      throw new Error(`${label} educational background is required`);
+    }
+
+    for (const [field, fieldLabel] of requiredEducationFields) {
+      if (!String(entry[field] || "").trim()) {
+        throw new Error(`${label} ${fieldLabel} is required`);
+      }
     }
   }
 
@@ -2057,7 +2095,9 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   );
 
   if (!student) {
-    throw new Error("Student profile not found");
+    throw new Error(
+      "Your account is missing a student profile. Please contact the registrar or administrator to complete your student record before submitting a document request."
+    );
   }
 
   const documents: any[] = await sequelize.query(
@@ -2089,9 +2129,12 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     .filter(Boolean)
     .join(" ")
     .trim();
+  const normalizedCourseText =
+    String(payload.course_text || "").trim() || String(student.course_name || "").trim();
 
   const formSnapshot = {
     ...payload,
+    course_text: normalizedCourseText,
     delivery_method: payload.delivery_method,
   };
 
