@@ -151,13 +151,14 @@ const fitTextBlock = (
 };
 
 const safeDateTime = (value: unknown) => {
-  if (!value || typeof value !== "string") {
+  if (!value) {
     return "";
   }
 
-  const parsed = new Date(value);
+  const parsed =
+    value instanceof Date ? value : new Date(typeof value === "string" || typeof value === "number" ? value : "");
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return String(value);
   }
 
   return parsed.toLocaleString("en-PH", {
@@ -290,7 +291,11 @@ export const generateClaimStubPdf = async (
     y += line(doc, "DOCUMENT REQUESTED:", request.items.map((item) => upper(item.document_name)).join(", "), 48, y, 460, 2);
     y += line(doc, "PURPOSE:", upper(request.purpose), 48, y, 460, 2);
     y += line(doc, "REQUEST DATE:", safeDateTime(request.submitted_at), 48, y);
-    y += line(doc, "READY FOR RELEASE DATE:", safeDateTime(release.expected_release_date || release.date_released), 48, y);
+    const readyForReleaseDate =
+      release.expected_release_date ||
+      release.ready_for_release_at ||
+      release.date_released;
+    y += line(doc, "READY FOR RELEASE DATE:", safeDateTime(readyForReleaseDate), 48, y);
     y += line(doc, "RELEASE METHOD:", upper(release.release_method || "PICKUP"), 48, y);
     y += line(doc, "CLAIM LOCATION:", "OFFICE OF THE REGISTRAR", 48, y);
 

@@ -80,7 +80,7 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
   AWAITING_PAYMENT: ["payment.assess", "approval.college_admin.approve"],
   PAYMENT_SUBMITTED: ["payment.submit.own"],
   PAYMENT_CONFIRMED: ["payment.confirm"],
-  UNDER_REGISTRAR_PROCESSING: ["payment.confirm"],
+  UNDER_REGISTRAR_PROCESSING: ["payment.confirm", "payment.assess"],
   DOCUMENT_GENERATION: ["document.prepare"],
   READY_FOR_RELEASE: ["document.generate"],
   CLAIMED: ["document.claim"],
@@ -103,7 +103,7 @@ const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
   AWAITING_PAYMENT: ["registrar", "college_admin", "admin"],
   PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
   PAYMENT_CONFIRMED: ["treasurer", "admin"],
-  UNDER_REGISTRAR_PROCESSING: ["treasurer", "admin"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar", "admin"],
   DOCUMENT_GENERATION: ["registrar", "admin"],
   READY_FOR_RELEASE: ["registrar", "admin"],
   CLAIMED: ["registrar", "admin"],
@@ -146,6 +146,18 @@ const parseJsonField = <T>(value: any, fallback: T): T => {
   } catch {
     return fallback;
   }
+};
+
+const resolveWorkflowFinalFee = (
+  feeSnapshot: Record<string, any>,
+  items: Array<{ final_price?: number | string | null; base_price?: number | string | null }>
+) => {
+  const fallbackItemTotal = items.reduce(
+    (sum, item) => sum + Number(item.final_price ?? item.base_price ?? 0),
+    0
+  );
+
+  return Number(feeSnapshot.final_fee ?? feeSnapshot.assessed_fee ?? fallbackItemTotal);
 };
 
 const createWorkflowAuditLog = async ({
@@ -265,16 +277,35 @@ const promoteCollegeAdminApprovedRequests = async (
     feeSnapshot.final_fee =
       feeSnapshot.final_fee ?? feeSnapshot.assessed_fee ?? defaultFee;
     feeSnapshot.assessed_at = feeSnapshot.assessed_at || assessedAt;
-    feeSnapshot.notes = feeSnapshot.notes || "Auto-routed to payment after college administration approval.";
+    const shouldSkipPayment = Number(feeSnapshot.final_fee ?? defaultFee) <= 0;
+    const nextStatus: WorkflowStatus = shouldSkipPayment
+      ? "UNDER_REGISTRAR_PROCESSING"
+      : "AWAITING_PAYMENT";
+    const autoAdvanceRemarks = shouldSkipPayment
+      ? "Automatically routed to registrar processing because no payment is required."
+      : "Automatically routed to payment 1 minute after college administration approval.";
 
-    paymentSnapshot.payment_status = "AWAITING_PAYMENT";
+    feeSnapshot.notes = feeSnapshot.notes || autoAdvanceRemarks;
+
+    if (shouldSkipPayment) {
+      paymentSnapshot.payment_status = "NOT_REQUIRED";
+      paymentSnapshot.confirmed_at =
+        paymentSnapshot.confirmed_at || new Date().toISOString();
+      paymentSnapshot.confirmed_by_name =
+        paymentSnapshot.confirmed_by_name || "System";
+      paymentSnapshot.confirmation_notes =
+        paymentSnapshot.confirmation_notes ||
+        "No payment required for first-time free request.";
+    } else {
+      paymentSnapshot.payment_status = "AWAITING_PAYMENT";
+    }
 
     await sequelize.transaction(async (transaction) => {
       await sequelize.query(
         `
         UPDATE workflow_requests
         SET
-          current_status = 'AWAITING_PAYMENT',
+          current_status = :nextStatus,
           fee_snapshot_json = :feeSnapshot,
           payment_snapshot_json = :paymentSnapshot
         WHERE workflow_request_id = :workflowRequestId
@@ -283,6 +314,7 @@ const promoteCollegeAdminApprovedRequests = async (
         {
           replacements: {
             workflowRequestId: row.workflow_request_id,
+            nextStatus,
             feeSnapshot: JSON.stringify(feeSnapshot),
             paymentSnapshot: JSON.stringify(paymentSnapshot),
           },
@@ -308,7 +340,7 @@ const promoteCollegeAdminApprovedRequests = async (
           'system',
           'AUTO_ADVANCE_STATUS',
           'COLLEGE_ADMIN_APPROVED',
-          'AWAITING_PAYMENT',
+          :toStatus,
           :remarks,
           :payload,
           :actedByUserId,
@@ -318,11 +350,12 @@ const promoteCollegeAdminApprovedRequests = async (
         {
           replacements: {
             workflowRequestId: row.workflow_request_id,
-            remarks:
-              "Automatically routed to payment 1 minute after college administration approval.",
+            toStatus: nextStatus,
+            remarks: autoAdvanceRemarks,
             payload: JSON.stringify({
               auto_transition: true,
               delay_seconds: AUTO_PAYMENT_TRANSITION_DELAY_SECONDS,
+              skip_payment: shouldSkipPayment,
             }),
             actedByUserId: actionActorUserId,
           },
@@ -332,12 +365,21 @@ const promoteCollegeAdminApprovedRequests = async (
       );
     });
 
-    await createWorkflowNotification({
-      userId: row.student_user_id,
-      title: "Payment is now available",
-      message: `Request ${row.request_reference} is now awaiting payment submission.`,
-      status: "AWAITING_PAYMENT",
-    });
+    if (shouldSkipPayment) {
+      await createWorkflowNotification({
+        userId: row.student_user_id,
+        title: "No payment required",
+        message: `Request ${row.request_reference} qualified for first-time free processing and moved to registrar processing.`,
+        status: "UNDER_REGISTRAR_PROCESSING",
+      });
+    } else {
+      await createWorkflowNotification({
+        userId: row.student_user_id,
+        title: "Payment is now available",
+        message: `Request ${row.request_reference} is now awaiting payment submission.`,
+        status: "AWAITING_PAYMENT",
+      });
+    }
   }
 };
 
@@ -2978,6 +3020,13 @@ export const advanceWorkflowRequest = async (
       feeSnapshot.assessed_at || new Date().toISOString();
     feeSnapshot.notes = remarks || feeSnapshot.notes || null;
 
+    const finalFee = resolveWorkflowFinalFee(feeSnapshot, detail.items || []);
+    if (finalFee <= 0) {
+      throw new Error(
+        "Payment stage is skipped for first-time free requests."
+      );
+    }
+
     paymentSnapshot.payment_status = "AWAITING_PAYMENT";
   }
 
@@ -3020,6 +3069,19 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
+    const finalFee = resolveWorkflowFinalFee(feeSnapshot, detail.items || []);
+
+    if (finalFee <= 0) {
+      paymentSnapshot.payment_status = "NOT_REQUIRED";
+      paymentSnapshot.confirmed_at =
+        paymentSnapshot.confirmed_at || new Date().toISOString();
+      paymentSnapshot.confirmed_by_name =
+        paymentSnapshot.confirmed_by_name || "System";
+      paymentSnapshot.confirmation_notes =
+        paymentSnapshot.confirmation_notes ||
+        "No payment required for first-time free request.";
+    }
+
     approvalSnapshot.registrar_processing_owner =
       updates.registrar_name ||
       approvalSnapshot.registrar_name ||
@@ -3031,10 +3093,13 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "READY_FOR_RELEASE") {
+    const readyForReleaseAt = new Date().toISOString();
     releaseSnapshot.expected_release_date =
       updates.expected_release_date ||
       releaseSnapshot.expected_release_date ||
       null;
+    releaseSnapshot.ready_for_release_at =
+      releaseSnapshot.ready_for_release_at || readyForReleaseAt;
     releaseSnapshot.release_method =
       updates.release_method ||
       releaseSnapshot.release_method ||
@@ -3338,10 +3403,14 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
+    const isPaymentSkipped = String(paymentSnapshot.payment_status || "").toUpperCase() === "NOT_REQUIRED";
+
     await createWorkflowNotification({
       userId: detail.student_user_id,
-      title: "Payment confirmed",
-      message: `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      title: isPaymentSkipped ? "No payment required" : "Payment confirmed",
+      message: isPaymentSkipped
+        ? `Request ${detail.request_reference} qualified for first-time free processing and moved to registrar processing.`
+        : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
       status: body.target_status,
     });
   }
@@ -3809,14 +3878,21 @@ export const processWorkflowAction = async (
   }
 
   if (action === "fee_assess") {
-    await advanceWorkflowRequest(workflowRequestId, user, {
+    const assessedDetail = await advanceWorkflowRequest(workflowRequestId, user, {
       target_status: "FEE_ASSESSED",
       remarks: input.remarks,
       updates: input.updates,
     });
 
+    const assessedFinalFee = resolveWorkflowFinalFee(
+      assessedDetail?.fee_snapshot || {},
+      assessedDetail?.items || []
+    );
+    const nextStatus: WorkflowStatus =
+      assessedFinalFee <= 0 ? "UNDER_REGISTRAR_PROCESSING" : "AWAITING_PAYMENT";
+
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "AWAITING_PAYMENT",
+      target_status: nextStatus,
       remarks: input.remarks,
       updates: input.updates,
     });
