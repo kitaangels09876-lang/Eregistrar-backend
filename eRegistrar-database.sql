@@ -340,14 +340,7 @@ CREATE TABLE request_status_logs (
             REFERENCES payment_methods(method_id),
 
         FOREIGN KEY (verified_by)
-            REFERENCES admin_profiles(admin_id),
-
-        CONSTRAINT chk_payment_reference
-        CHECK (
-            (batch_id IS NOT NULL AND request_id IS NULL)
-            OR
-            (batch_id IS NULL AND request_id IS NOT NULL)
-        )
+            REFERENCES admin_profiles(admin_id)
     ) ENGINE=InnoDB;
 
 
