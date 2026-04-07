@@ -4,19 +4,6 @@ const mysql = require("mysql2/promise");
 require("dotenv").config();
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
-const sqlFile = process.env.SQL_FILE?.trim() || "eRegistrar-database.sql";
-const sqlPath = path.resolve(process.cwd(), sqlFile);
-const dryRun = process.env.DRY_RUN === "1";
-
-if (!databaseUrl) {
-  console.error("DATABASE_URL is not configured.");
-  process.exit(1);
-}
-
-if (!fs.existsSync(sqlPath)) {
-  console.error(`SQL file not found: ${sqlPath}`);
-  process.exit(1);
-}
 
 const stripLocalDatabaseDirectives = (sql) =>
   sql
@@ -27,6 +14,18 @@ const stripLocalDatabaseDirectives = (sql) =>
         !/^\s*USE\b/i.test(line)
     )
     .join("\n");
+
+const stripBootstrapDataSection = (sql) => {
+  const markerText = "DEFAULT BOOTSTRAP DATA";
+  const markerIndex = sql.toUpperCase().indexOf(markerText);
+
+  if (markerIndex === -1) {
+    return sql;
+  }
+
+  const lineStart = sql.lastIndexOf("\n", markerIndex);
+  return sql.slice(0, lineStart === -1 ? markerIndex : lineStart).trimEnd();
+};
 
 const normalizeCreateTableStatements = (sql) =>
   sql.replace(
@@ -126,6 +125,9 @@ const isSystemSettingsSeedStatement = (statement) =>
     normalizeStatementForMatching(statement)
   );
 
+const hasOnDuplicateKeyUpdate = (statement) =>
+  /\bON\s+DUPLICATE\s+KEY\s+UPDATE\b/i.test(statement);
+
 const shouldSkipSystemSettingsSeed = async (connection) => {
   try {
     const [rows] = await connection.query(
@@ -140,10 +142,25 @@ const shouldSkipSystemSettingsSeed = async (connection) => {
   }
 };
 
-async function main() {
+async function main(options = {}) {
+  const sqlFile = options.sqlFile || process.env.SQL_FILE?.trim() || "seeding/SeedMePo.sql";
+  const sqlPath = path.resolve(process.cwd(), sqlFile);
+  const dryRun = options.dryRun ?? process.env.DRY_RUN === "1";
+  const schemaOnly = options.schemaOnly ?? process.env.SCHEMA_ONLY === "1";
+
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is not configured.");
+  }
+
+  if (!fs.existsSync(sqlPath)) {
+    throw new Error(`SQL file not found: ${sqlPath}`);
+  }
+
   const rawSql = fs.readFileSync(sqlPath, "utf8");
   const sql = normalizeCreateTableStatements(
-    stripLocalDatabaseDirectives(rawSql)
+    schemaOnly
+      ? stripBootstrapDataSection(stripLocalDatabaseDirectives(rawSql))
+      : stripLocalDatabaseDirectives(rawSql)
   ).trim();
 
   if (!sql) {
@@ -152,8 +169,14 @@ async function main() {
   }
 
   const statements = splitSqlStatements(sql);
+  const executableStatements = schemaOnly
+    ? statements.filter((statement) => {
+        const normalized = normalizeStatementForMatching(statement);
+        return /^(CREATE|ALTER)\b/i.test(normalized);
+      })
+    : statements;
 
-  if (!statements.length) {
+  if (!executableStatements.length) {
     console.error("No executable SQL statements were found.");
     process.exit(1);
   }
@@ -163,14 +186,16 @@ async function main() {
       JSON.stringify(
         {
           sqlFile: path.basename(sqlPath),
-          statementCount: statements.length,
-          createTableCount: statements.filter((statement) =>
+          statementCount: executableStatements.length,
+          createTableCount: executableStatements.filter((statement) =>
             /^CREATE\s+TABLE\b/i.test(normalizeStatementForMatching(statement))
           ).length,
-          insertCount: statements.filter((statement) =>
+          insertCount: executableStatements.filter((statement) =>
             /^INSERT\b/i.test(normalizeStatementForMatching(statement))
           ).length,
-          systemSettingsSeedPresent: statements.some(isSystemSettingsSeedStatement),
+          systemSettingsSeedPresent: executableStatements.some(
+            isSystemSettingsSeedStatement
+          ),
         },
         null,
         2
@@ -185,11 +210,16 @@ async function main() {
 
   try {
     console.log(
-      `Importing ${path.basename(sqlPath)} into DATABASE_URL with ${statements.length} statements...`
+      `Importing ${path.basename(sqlPath)} into DATABASE_URL with ${executableStatements.length} statements...`
     );
 
-    for (const statement of statements) {
+    for (const statement of executableStatements) {
       if (isSystemSettingsSeedStatement(statement)) {
+        if (hasOnDuplicateKeyUpdate(statement)) {
+          await connection.query(statement);
+          continue;
+        }
+
         const shouldSkip = await shouldSkipSystemSettingsSeed(connection);
         if (shouldSkip) {
           console.log(
@@ -208,8 +238,12 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("SQL import failed.");
-  console.error(error && (error.code || error.message || error));
-  process.exit(1);
-});
+module.exports = main;
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("SQL import failed.");
+    console.error(error && (error.code || error.message || error));
+    process.exit(1);
+  });
+}

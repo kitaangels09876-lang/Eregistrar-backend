@@ -36,13 +36,8 @@ app.use(
   })
 );
 
-app.use(
-  "/uploads",
-  express.static(path.join(__dirname, "uploads"))
-);
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-
-// Health check
 app.get("/", (_req, res) => {
   res.json({
     status: "success",
@@ -51,16 +46,9 @@ app.get("/", (_req, res) => {
   });
 });
 
-// AUTH
 app.use("/api/auth", authRoutes);
-
-// STUDENT ROUTES
 app.use("/api", studentRoutes);
-
-// NOTIFICATION ROUTES
 app.use("/api", noticationRoutes);
-
-// ADMIN / REGISTRAR ROUTES
 app.use("/api", activityLogRoutes);
 app.use("/api", announcementRoutes);
 app.use("/api", documentRoutes);
@@ -71,7 +59,6 @@ app.use("/api", systemSettingsRoutes);
 app.use("/api", courseRoutes);
 app.use("/api", workflowRequestRoutes);
 
-
 app.use(errorHandler);
 
 app.use((_req, res) => {
@@ -81,24 +68,27 @@ app.use((_req, res) => {
   });
 });
 
-sequelize
-  .authenticate()
-  .then(async () => {
-    console.log("✅ Database connected successfully");
+const startServer = async () => {
+  try {
+    await sequelize.authenticate();
+    console.log("Database connected successfully");
 
     await ensureDefaultDocumentTypes();
     console.log("Default document types ensured");
+
     app.listen(PORT, () => {
-      console.log(`🚀 Server running at http://localhost:${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log(`Server running at http://localhost:${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(
-        `🔗 Frontend: ${process.env.FRONTEND_URL || "http://localhost:3000"}`
+        `Frontend: ${process.env.FRONTEND_URL || "http://localhost:3000"}`
       );
     });
-  })
-  .catch((err) => {
-    console.error("❌ Database connection failed:", err);
+  } catch (error) {
+    console.error("Application startup failed:", error);
     process.exit(1);
-  });
+  }
+};
+
+void startServer();
 
 export default app;

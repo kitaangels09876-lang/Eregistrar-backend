@@ -5,8 +5,10 @@
  "scripts": {
   "dev": "tsx watch server.ts",
   "build": "tsc",
-  "start": "node dist/server.js",
-  "db:import": "node scripts/import-sql.js"
+  "start": "node scripts/bootstrap-start.js",
+  "db:import": "node scripts/import-database.js",
+  "db:schema": "node scripts/import-schema.js",
+  "db:seed": "node scripts/import-seed.js"
  },
  "dependencies": {
   "@types/qrcode": "^1.5.6",
