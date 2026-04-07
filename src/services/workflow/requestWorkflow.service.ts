@@ -203,6 +203,7 @@ const promoteCollegeAdminApprovedRequests = async (
   const rows: Array<{
     workflow_request_id: number;
     student_user_id: number | null;
+    college_admin_user_id: number | null;
     request_reference: string;
     fee_snapshot_json: any;
     payment_snapshot_json: any;
@@ -213,6 +214,7 @@ const promoteCollegeAdminApprovedRequests = async (
     SELECT
       wr.workflow_request_id,
       wr.student_user_id,
+      wr.college_admin_user_id,
       wr.request_reference,
       wr.fee_snapshot_json,
       wr.payment_snapshot_json,
@@ -226,6 +228,7 @@ const promoteCollegeAdminApprovedRequests = async (
     GROUP BY
       wr.workflow_request_id,
       wr.student_user_id,
+      wr.college_admin_user_id,
       wr.request_reference,
       wr.fee_snapshot_json,
       wr.payment_snapshot_json,
@@ -249,6 +252,9 @@ const promoteCollegeAdminApprovedRequests = async (
     const approvalSnapshot = parseJsonField<Record<string, any>>(
       row.approval_snapshot_json,
       {}
+    );
+    const actionActorUserId = Number(
+      row.college_admin_user_id || row.student_user_id
     );
     const defaultFee = Number(row.default_fee || 0);
     const assessedAt =
@@ -305,7 +311,7 @@ const promoteCollegeAdminApprovedRequests = async (
           'AWAITING_PAYMENT',
           :remarks,
           :payload,
-          NULL,
+          :actedByUserId,
           NOW()
         )
         `,
@@ -318,6 +324,7 @@ const promoteCollegeAdminApprovedRequests = async (
               auto_transition: true,
               delay_seconds: AUTO_PAYMENT_TRANSITION_DELAY_SECONDS,
             }),
+            actedByUserId: actionActorUserId,
           },
           transaction,
           type: QueryTypes.INSERT,
@@ -897,6 +904,22 @@ const ensureWorkflowSchema = async () => {
   `);
 
   await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS workflow_registrar_assignments (
+      registrar_assignment_id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      course_id INT NULL,
+      department_id INT NULL,
+      college_id INT NULL,
+      is_active TINYINT(1) DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id),
+      FOREIGN KEY (course_id) REFERENCES courses(course_id),
+      FOREIGN KEY (department_id) REFERENCES workflow_departments(department_id),
+      FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
+    ) ENGINE=InnoDB;
+  `);
+
+  await sequelize.query(`
     CREATE TABLE IF NOT EXISTS workflow_college_admin_assignments (
       college_admin_assignment_id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
@@ -1368,6 +1391,40 @@ const hasScopedDeanAccess = async (detail: any, userId: number) => {
   return Boolean(match);
 };
 
+const hasScopedRegistrarAccess = async (detail: any, userId: number) => {
+  const scope = getWorkflowRequestAcademicScope(detail);
+
+  if (!scope.course_id && !scope.department_id && !scope.college_id) {
+    return false;
+  }
+
+  const [match]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM workflow_registrar_assignments
+    WHERE user_id = :userId
+      AND is_active = 1
+      AND (
+        course_id = :courseId
+        OR department_id = :departmentId
+        OR college_id = :collegeId
+      )
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        userId,
+        courseId: scope.course_id,
+        departmentId: scope.department_id,
+        collegeId: scope.college_id,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return Boolean(match);
+};
+
 const hasScopedCollegeAdminAccess = async (detail: any, userId: number) => {
   if (detail.college_admin_user_id === userId) {
     return true;
@@ -1405,9 +1462,19 @@ const assertCanViewWorkflowRequest = async (
   user: AuthUser,
   roles: string[]
 ) => {
-  if (roles.includes("admin") || roles.includes("registrar")) {
+  if (roles.includes("admin")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
       throw new Error("Missing permission to view workflow requests");
+    }
+    return;
+  }
+
+  if (roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.registrar])) {
+      throw new Error("Missing permission to view registrar workflow requests");
+    }
+    if (!(await hasScopedRegistrarAccess(detail, user.user_id))) {
+      throw new Error("You do not have access to this registrar workflow request");
     }
     return;
   }
@@ -1533,6 +1600,7 @@ const resolveAcademicScope = async (courseId: number | null) => {
       college_name: null,
       department_id: null,
       department_name: null,
+      registrar_user_id: null,
       dean_user_id: null,
       college_admin_user_id: null,
     };
@@ -1585,6 +1653,31 @@ const resolveAcademicScope = async (courseId: number | null) => {
     }
   );
 
+  const [registrar]: any[] = await sequelize.query(
+    `
+    SELECT user_id
+    FROM workflow_registrar_assignments
+    WHERE is_active = 1
+      AND (course_id = :courseId OR department_id = :departmentId OR college_id = :collegeId)
+    ORDER BY
+      CASE
+        WHEN course_id = :courseId THEN 1
+        WHEN department_id = :departmentId THEN 2
+        WHEN college_id = :collegeId THEN 3
+        ELSE 4
+      END
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        courseId,
+        departmentId: scope?.department_id || null,
+        collegeId: scope?.college_id || null,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
   const [collegeAdmin]: any[] = await sequelize.query(
     `
     SELECT user_id
@@ -1603,6 +1696,7 @@ const resolveAcademicScope = async (courseId: number | null) => {
     college_name: scope?.college_name || null,
     department_id: scope?.department_id || null,
     department_name: scope?.department_name || null,
+    registrar_user_id: registrar?.user_id || null,
     dean_user_id: dean?.user_id || null,
     college_admin_user_id: collegeAdmin?.user_id || null,
   };
@@ -2382,6 +2476,15 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     });
   }
 
+  if (academicScope.registrar_user_id) {
+    await createWorkflowNotification({
+      userId: academicScope.registrar_user_id,
+      title: "Registrar review required",
+      message: `Request ${requestReference} was submitted by a student in your assigned academic scope.`,
+      status: "SUBMITTED",
+    });
+  }
+
   await createWorkflowNotification({
     userId: user.user_id,
     title: "Request submitted",
@@ -2424,11 +2527,29 @@ export const listWorkflowRequests = async (
     }
     whereClauses.push("wr.student_user_id = :userId");
     replacements.userId = user.user_id;
-  } else if (roles.includes("admin") || roles.includes("registrar")) {
+  } else if (roles.includes("admin")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
       throw new Error("Missing permission to list workflow requests");
     }
     // Operational staff can see the full queue.
+  } else if (roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.registrar])) {
+      throw new Error("Missing permission to list registrar workflow requests");
+    }
+    whereClauses.push(`
+      EXISTS (
+        SELECT 1
+        FROM workflow_registrar_assignments wra
+        WHERE wra.user_id = :userId
+          AND wra.is_active = 1
+          AND (
+            wra.course_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.course_id')), '') AS UNSIGNED)
+            OR wra.department_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.department_id')), '') AS UNSIGNED)
+            OR wra.college_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.college_id')), '') AS UNSIGNED)
+          )
+      )
+    `);
+    replacements.userId = user.user_id;
   } else if (roles.includes("dean")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
       throw new Error("Missing permission to list dean workflow queue");
@@ -2720,12 +2841,14 @@ export const advanceWorkflowRequest = async (
   const detail = await getRequestDetailInternal(workflowRequestId);
   const currentStatus = detail.current_status as WorkflowStatus;
   const allowedNext = WORKFLOW_TRANSITIONS[currentStatus] || [];
+  const roles = getRoleNames(user);
+
+  await assertCanViewWorkflowRequest(detail, user, roles);
 
   if (!allowedNext.includes(body.target_status)) {
     throw new Error(`Request cannot move from ${currentStatus} to ${body.target_status}`);
   }
 
-  const roles = getRoleNames(user);
   assertCanAdvance(user, roles, body.target_status);
 
   const approvalSnapshot = { ...detail.approval_snapshot };

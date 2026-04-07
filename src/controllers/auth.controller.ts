@@ -29,7 +29,9 @@ import {
 } from "../services/auth/refreshToken.service";
 import {
   listDeanAssignments,
+  listRegistrarAssignments,
   replaceDeanAssignments,
+  replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
 
 const isProductionEnvironment = (): boolean =>
@@ -64,17 +66,26 @@ const buildAuthScopes = (
   },
 });
 
-const buildDeanAcademicScope = async (roles: string[], userId: number) => {
-  if (!roles.includes("dean")) {
-    return {};
+const buildStaffAcademicScope = async (roles: string[], userId: number) => {
+  const workflowScope: Record<string, unknown> = {};
+
+  if (roles.includes("dean")) {
+    const deanCourses = await listDeanAssignments(userId);
+    workflowScope.dean_course_ids = deanCourses.map(
+      (assignment) => assignment.course_id
+    );
+    workflowScope.dean_courses = deanCourses;
   }
 
-  const deanCourses = await listDeanAssignments(userId);
+  if (roles.includes("registrar")) {
+    const registrarCourses = await listRegistrarAssignments(userId);
+    workflowScope.registrar_course_ids = registrarCourses.map(
+      (assignment) => assignment.course_id
+    );
+    workflowScope.registrar_courses = registrarCourses;
+  }
 
-  return {
-    dean_course_ids: deanCourses.map((assignment) => assignment.course_id),
-    dean_courses: deanCourses,
-  };
+  return workflowScope;
 };
 
 
@@ -98,6 +109,7 @@ export const registerStaff = async (req: Request, res: Response) => {
       last_name,
       contact_number,
       dean_course_ids,
+      registrar_course_ids,
     } = req.body;
 
     const creatorUserId = getUserIdFromRequest(req);
@@ -170,6 +182,14 @@ export const registerStaff = async (req: Request, res: Response) => {
       await replaceDeanAssignments(user.user_id, dean_course_ids, transaction);
     }
 
+    if (role === "registrar") {
+      await replaceRegistrarAssignments(
+        user.user_id,
+        registrar_course_ids,
+        transaction
+      );
+    }
+
     await transaction.commit();
 
     await logActivity({
@@ -237,7 +257,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       return sendSingleFieldValidationError(
         res,
         "email",
-        "This email is already registered."
+        "That email is already registered. Try signing in or use a different email address."
       );
     }
 
@@ -249,7 +269,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       return sendSingleFieldValidationError(
         res,
         "student_number",
-        "This student number is already registered."
+        "That student number is already linked to an existing account."
       );
     }
 
@@ -375,13 +395,15 @@ export const registerStudent = async (req: Request, res: Response) => {
         error?.fields?.email
           ? {
               field: "email",
-              message: "This email is already registered.",
+              message:
+                "That email is already registered. Try signing in or use a different email address.",
             }
           : null,
         error?.fields?.student_number
           ? {
               field: "student_number",
-              message: "This student number is already registered.",
+              message:
+                "That student number is already linked to an existing account.",
             }
           : null,
       ].filter(Boolean) as Array<{ field: string; message: string }>;
@@ -407,7 +429,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       return sendSingleFieldValidationError(
         res,
         "course_id",
-        "Selected course does not exist."
+        "The selected course could not be found. Please choose your course again."
       );
     }
 
@@ -545,7 +567,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       const scopes = buildAuthScopes(
         roles,
         profile,
-        await buildDeanAcademicScope(roles, user.user_id)
+        await buildStaffAcademicScope(roles, user.user_id)
       );
 
       return res.status(200).json({
@@ -771,7 +793,7 @@ export const checkAuth = async (req: Request, res: Response) => {
       scopes: buildAuthScopes(
         roles,
         profile,
-        await buildDeanAcademicScope(roles, user.user_id)
+        await buildStaffAcademicScope(roles, user.user_id)
       ),
       profile,
     });

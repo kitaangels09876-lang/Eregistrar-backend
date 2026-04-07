@@ -4,7 +4,10 @@ import { QueryTypes, UniqueConstraintError } from "sequelize";
 import {
   clearDeanAssignments,
   listDeanAssignments,
+  clearRegistrarAssignments,
+  listRegistrarAssignments,
   replaceDeanAssignments,
+  replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
 
 export const getAllAdminAndRegistrarAccounts = async (
@@ -205,6 +208,17 @@ export const getAdminOrRegistrarById = async (
     } else {
       data.dean_course_ids = [];
       data.dean_courses = [];
+    }
+
+    if (roles.includes("registrar")) {
+      const registrarCourses = await listRegistrarAssignments(Number(userId));
+      data.registrar_course_ids = registrarCourses.map(
+        (assignment) => assignment.course_id
+      );
+      data.registrar_courses = registrarCourses;
+    } else {
+      data.registrar_course_ids = [];
+      data.registrar_courses = [];
     }
 
     data.role = roles[0] || null;
@@ -490,6 +504,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       contact_number,
       role,
       dean_course_ids,
+      registrar_course_ids,
     } = req.body;
     const allowedRoles = [
       "admin",
@@ -499,6 +514,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       "treasurer",
     ];
     const hasDeanCourseIdsInput = dean_course_ids !== undefined;
+    const hasRegistrarCourseIdsInput = registrar_course_ids !== undefined;
 
     const normalizedEmail =
       email === undefined ? undefined : String(email).trim().toLowerCase();
@@ -527,6 +543,15 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
           )
         )
       : [];
+    const normalizedRegistrarCourseIds = Array.isArray(registrar_course_ids)
+      ? Array.from(
+          new Set(
+            registrar_course_ids
+              .map((courseId: unknown) => Number(courseId))
+              .filter((courseId: number) => Number.isInteger(courseId) && courseId > 0)
+          )
+        )
+      : [];
 
     if (
       normalizedEmail === undefined &&
@@ -536,7 +561,8 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       normalizedLastName === undefined &&
       normalizedContactNumber === undefined &&
       normalizedRole === undefined &&
-      !hasDeanCourseIdsInput
+      !hasDeanCourseIdsInput &&
+      !hasRegistrarCourseIdsInput
     ) {
       await transaction.rollback();
       return res.status(400).json({
@@ -665,6 +691,19 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
         return res.status(400).json({
           status: "error",
           message: "Select at least one course assignment for the dean role",
+        });
+      }
+    }
+
+    if (nextRole === "registrar") {
+      if (
+        (normalizedRole === "registrar" || hasRegistrarCourseIdsInput) &&
+        normalizedRegistrarCourseIds.length === 0
+      ) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Select at least one course assignment for the registrar role",
         });
       }
     }
@@ -803,6 +842,19 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       await replaceDeanAssignments(targetUserId, normalizedDeanCourseIds, transaction);
     } else if (nextRole !== "dean" && (currentRole === "dean" || hasDeanCourseIdsInput)) {
       await clearDeanAssignments(targetUserId, transaction);
+    }
+
+    if (nextRole === "registrar" && hasRegistrarCourseIdsInput) {
+      await replaceRegistrarAssignments(
+        targetUserId,
+        normalizedRegistrarCourseIds,
+        transaction
+      );
+    } else if (
+      nextRole !== "registrar" &&
+      (currentRole === "registrar" || hasRegistrarCourseIdsInput)
+    ) {
+      await clearRegistrarAssignments(targetUserId, transaction);
     }
 
     await transaction.commit();

@@ -21,6 +21,7 @@ export const validateAdminRegister = (
     last_name,
     contact_number,
     dean_course_ids,
+    registrar_course_ids,
   } = req.body;
 
   const errors: { field: string; message: string }[] = [];
@@ -43,6 +44,32 @@ export const validateAdminRegister = (
     if (typeof dean_course_ids === "string" && dean_course_ids.trim()) {
       try {
         const parsed = JSON.parse(dean_course_ids);
+        return Array.isArray(parsed)
+          ? parsed
+              .map((courseId) => Number(courseId))
+              .filter((courseId) => Number.isInteger(courseId) && courseId > 0)
+          : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return [];
+  })();
+
+  const normalizedRegistrarCourseIds = (() => {
+    if (Array.isArray(registrar_course_ids)) {
+      return registrar_course_ids
+        .map((courseId) => Number(courseId))
+        .filter((courseId) => Number.isInteger(courseId) && courseId > 0);
+    }
+
+    if (
+      typeof registrar_course_ids === "string" &&
+      registrar_course_ids.trim()
+    ) {
+      try {
+        const parsed = JSON.parse(registrar_course_ids);
         return Array.isArray(parsed)
           ? parsed
               .map((courseId) => Number(courseId))
@@ -95,6 +122,16 @@ export const validateAdminRegister = (
     errors.push({
       field: "dean_course_ids",
       message: "Select at least one course assignment for the dean role",
+    });
+  }
+
+  if (
+    role?.trim().toLowerCase() === "registrar" &&
+    normalizedRegistrarCourseIds.length === 0
+  ) {
+    errors.push({
+      field: "registrar_course_ids",
+      message: "Select at least one course assignment for the registrar role",
     });
   }
 
@@ -155,6 +192,7 @@ export const validateAdminRegister = (
   req.body.last_name = last_name.trim();
   req.body.contact_number = contact_number.trim();
   req.body.dean_course_ids = normalizedDeanCourseIds;
+  req.body.registrar_course_ids = normalizedRegistrarCourseIds;
 
   next();
 };
