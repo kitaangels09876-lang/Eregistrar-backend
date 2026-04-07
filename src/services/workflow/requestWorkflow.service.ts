@@ -80,7 +80,7 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
   AWAITING_PAYMENT: ["payment.assess", "approval.college_admin.approve"],
   PAYMENT_SUBMITTED: ["payment.submit.own"],
   PAYMENT_CONFIRMED: ["payment.confirm"],
-  UNDER_REGISTRAR_PROCESSING: ["payment.confirm"],
+  UNDER_REGISTRAR_PROCESSING: ["payment.confirm", "payment.assess"],
   DOCUMENT_GENERATION: ["document.prepare"],
   READY_FOR_RELEASE: ["document.generate"],
   CLAIMED: ["document.claim"],
@@ -103,7 +103,7 @@ const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
   AWAITING_PAYMENT: ["registrar", "college_admin", "admin"],
   PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
   PAYMENT_CONFIRMED: ["treasurer", "admin"],
-  UNDER_REGISTRAR_PROCESSING: ["treasurer", "admin"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar", "admin"],
   DOCUMENT_GENERATION: ["registrar", "admin"],
   READY_FOR_RELEASE: ["registrar", "admin"],
   CLAIMED: ["registrar", "admin"],
@@ -146,6 +146,18 @@ const parseJsonField = <T>(value: any, fallback: T): T => {
   } catch {
     return fallback;
   }
+};
+
+const resolveWorkflowFinalFee = (
+  feeSnapshot: Record<string, any>,
+  items: Array<{ final_price?: number | string | null; base_price?: number | string | null }>
+) => {
+  const fallbackItemTotal = items.reduce(
+    (sum, item) => sum + Number(item.final_price ?? item.base_price ?? 0),
+    0
+  );
+
+  return Number(feeSnapshot.final_fee ?? feeSnapshot.assessed_fee ?? fallbackItemTotal);
 };
 
 const createWorkflowAuditLog = async ({
@@ -203,6 +215,7 @@ const promoteCollegeAdminApprovedRequests = async (
   const rows: Array<{
     workflow_request_id: number;
     student_user_id: number | null;
+    college_admin_user_id: number | null;
     request_reference: string;
     fee_snapshot_json: any;
     payment_snapshot_json: any;
@@ -213,6 +226,7 @@ const promoteCollegeAdminApprovedRequests = async (
     SELECT
       wr.workflow_request_id,
       wr.student_user_id,
+      wr.college_admin_user_id,
       wr.request_reference,
       wr.fee_snapshot_json,
       wr.payment_snapshot_json,
@@ -226,6 +240,7 @@ const promoteCollegeAdminApprovedRequests = async (
     GROUP BY
       wr.workflow_request_id,
       wr.student_user_id,
+      wr.college_admin_user_id,
       wr.request_reference,
       wr.fee_snapshot_json,
       wr.payment_snapshot_json,
@@ -250,6 +265,9 @@ const promoteCollegeAdminApprovedRequests = async (
       row.approval_snapshot_json,
       {}
     );
+    const actionActorUserId = Number(
+      row.college_admin_user_id || row.student_user_id
+    );
     const defaultFee = Number(row.default_fee || 0);
     const assessedAt =
       approvalSnapshot.college_admin_approved_at || new Date().toISOString();
@@ -259,16 +277,35 @@ const promoteCollegeAdminApprovedRequests = async (
     feeSnapshot.final_fee =
       feeSnapshot.final_fee ?? feeSnapshot.assessed_fee ?? defaultFee;
     feeSnapshot.assessed_at = feeSnapshot.assessed_at || assessedAt;
-    feeSnapshot.notes = feeSnapshot.notes || "Auto-routed to payment after college administration approval.";
+    const shouldSkipPayment = Number(feeSnapshot.final_fee ?? defaultFee) <= 0;
+    const nextStatus: WorkflowStatus = shouldSkipPayment
+      ? "UNDER_REGISTRAR_PROCESSING"
+      : "AWAITING_PAYMENT";
+    const autoAdvanceRemarks = shouldSkipPayment
+      ? "Automatically routed to registrar processing because no payment is required."
+      : "Automatically routed to payment 1 minute after college administration approval.";
 
-    paymentSnapshot.payment_status = "AWAITING_PAYMENT";
+    feeSnapshot.notes = feeSnapshot.notes || autoAdvanceRemarks;
+
+    if (shouldSkipPayment) {
+      paymentSnapshot.payment_status = "NOT_REQUIRED";
+      paymentSnapshot.confirmed_at =
+        paymentSnapshot.confirmed_at || new Date().toISOString();
+      paymentSnapshot.confirmed_by_name =
+        paymentSnapshot.confirmed_by_name || "System";
+      paymentSnapshot.confirmation_notes =
+        paymentSnapshot.confirmation_notes ||
+        "No payment required for first-time free request.";
+    } else {
+      paymentSnapshot.payment_status = "AWAITING_PAYMENT";
+    }
 
     await sequelize.transaction(async (transaction) => {
       await sequelize.query(
         `
         UPDATE workflow_requests
         SET
-          current_status = 'AWAITING_PAYMENT',
+          current_status = :nextStatus,
           fee_snapshot_json = :feeSnapshot,
           payment_snapshot_json = :paymentSnapshot
         WHERE workflow_request_id = :workflowRequestId
@@ -277,6 +314,7 @@ const promoteCollegeAdminApprovedRequests = async (
         {
           replacements: {
             workflowRequestId: row.workflow_request_id,
+            nextStatus,
             feeSnapshot: JSON.stringify(feeSnapshot),
             paymentSnapshot: JSON.stringify(paymentSnapshot),
           },
@@ -302,22 +340,24 @@ const promoteCollegeAdminApprovedRequests = async (
           'system',
           'AUTO_ADVANCE_STATUS',
           'COLLEGE_ADMIN_APPROVED',
-          'AWAITING_PAYMENT',
+          :toStatus,
           :remarks,
           :payload,
-          NULL,
+          :actedByUserId,
           NOW()
         )
         `,
         {
           replacements: {
             workflowRequestId: row.workflow_request_id,
-            remarks:
-              "Automatically routed to payment 1 minute after college administration approval.",
+            toStatus: nextStatus,
+            remarks: autoAdvanceRemarks,
             payload: JSON.stringify({
               auto_transition: true,
               delay_seconds: AUTO_PAYMENT_TRANSITION_DELAY_SECONDS,
+              skip_payment: shouldSkipPayment,
             }),
+            actedByUserId: actionActorUserId,
           },
           transaction,
           type: QueryTypes.INSERT,
@@ -325,12 +365,21 @@ const promoteCollegeAdminApprovedRequests = async (
       );
     });
 
-    await createWorkflowNotification({
-      userId: row.student_user_id,
-      title: "Payment is now available",
-      message: `Request ${row.request_reference} is now awaiting payment submission.`,
-      status: "AWAITING_PAYMENT",
-    });
+    if (shouldSkipPayment) {
+      await createWorkflowNotification({
+        userId: row.student_user_id,
+        title: "No payment required",
+        message: `Request ${row.request_reference} qualified for first-time free processing and moved to registrar processing.`,
+        status: "UNDER_REGISTRAR_PROCESSING",
+      });
+    } else {
+      await createWorkflowNotification({
+        userId: row.student_user_id,
+        title: "Payment is now available",
+        message: `Request ${row.request_reference} is now awaiting payment submission.`,
+        status: "AWAITING_PAYMENT",
+      });
+    }
   }
 };
 
@@ -897,6 +946,22 @@ const ensureWorkflowSchema = async () => {
   `);
 
   await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS workflow_registrar_assignments (
+      registrar_assignment_id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      course_id INT NULL,
+      department_id INT NULL,
+      college_id INT NULL,
+      is_active TINYINT(1) DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(user_id),
+      FOREIGN KEY (course_id) REFERENCES courses(course_id),
+      FOREIGN KEY (department_id) REFERENCES workflow_departments(department_id),
+      FOREIGN KEY (college_id) REFERENCES workflow_colleges(college_id)
+    ) ENGINE=InnoDB;
+  `);
+
+  await sequelize.query(`
     CREATE TABLE IF NOT EXISTS workflow_college_admin_assignments (
       college_admin_assignment_id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
@@ -1368,6 +1433,40 @@ const hasScopedDeanAccess = async (detail: any, userId: number) => {
   return Boolean(match);
 };
 
+const hasScopedRegistrarAccess = async (detail: any, userId: number) => {
+  const scope = getWorkflowRequestAcademicScope(detail);
+
+  if (!scope.course_id && !scope.department_id && !scope.college_id) {
+    return false;
+  }
+
+  const [match]: any[] = await sequelize.query(
+    `
+    SELECT 1
+    FROM workflow_registrar_assignments
+    WHERE user_id = :userId
+      AND is_active = 1
+      AND (
+        course_id = :courseId
+        OR department_id = :departmentId
+        OR college_id = :collegeId
+      )
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        userId,
+        courseId: scope.course_id,
+        departmentId: scope.department_id,
+        collegeId: scope.college_id,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return Boolean(match);
+};
+
 const hasScopedCollegeAdminAccess = async (detail: any, userId: number) => {
   if (detail.college_admin_user_id === userId) {
     return true;
@@ -1405,9 +1504,19 @@ const assertCanViewWorkflowRequest = async (
   user: AuthUser,
   roles: string[]
 ) => {
-  if (roles.includes("admin") || roles.includes("registrar")) {
+  if (roles.includes("admin")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
       throw new Error("Missing permission to view workflow requests");
+    }
+    return;
+  }
+
+  if (roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.registrar])) {
+      throw new Error("Missing permission to view registrar workflow requests");
+    }
+    if (!(await hasScopedRegistrarAccess(detail, user.user_id))) {
+      throw new Error("You do not have access to this registrar workflow request");
     }
     return;
   }
@@ -1533,6 +1642,7 @@ const resolveAcademicScope = async (courseId: number | null) => {
       college_name: null,
       department_id: null,
       department_name: null,
+      registrar_user_id: null,
       dean_user_id: null,
       college_admin_user_id: null,
     };
@@ -1585,6 +1695,31 @@ const resolveAcademicScope = async (courseId: number | null) => {
     }
   );
 
+  const [registrar]: any[] = await sequelize.query(
+    `
+    SELECT user_id
+    FROM workflow_registrar_assignments
+    WHERE is_active = 1
+      AND (course_id = :courseId OR department_id = :departmentId OR college_id = :collegeId)
+    ORDER BY
+      CASE
+        WHEN course_id = :courseId THEN 1
+        WHEN department_id = :departmentId THEN 2
+        WHEN college_id = :collegeId THEN 3
+        ELSE 4
+      END
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        courseId,
+        departmentId: scope?.department_id || null,
+        collegeId: scope?.college_id || null,
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
   const [collegeAdmin]: any[] = await sequelize.query(
     `
     SELECT user_id
@@ -1603,6 +1738,7 @@ const resolveAcademicScope = async (courseId: number | null) => {
     college_name: scope?.college_name || null,
     department_id: scope?.department_id || null,
     department_name: scope?.department_name || null,
+    registrar_user_id: registrar?.user_id || null,
     dean_user_id: dean?.user_id || null,
     college_admin_user_id: collegeAdmin?.user_id || null,
   };
@@ -2016,17 +2152,55 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   }
 
   const requiredFieldChecks: Array<[string, string | null | undefined]> = [
-    ["civil_status", payload.civil_status],
-    ["gender", payload.gender],
-    ["contact_number", payload.contact_number],
-    ["address_line", payload.address_line],
-    ["academic_year_label", payload.academic_year_label],
-    ["purpose", payload.purpose],
+    ["Civil Status", payload.civil_status],
+    ["Gender", payload.gender],
+    ["Contact Number", payload.contact_number],
+    ["Purok", payload.purok],
+    ["Barangay", payload.barangay],
+    ["Municipality", payload.municipality],
+    ["Province", payload.province],
+    ["Academic Year", payload.academic_year_label],
+    ["Place of Birth", payload.place_of_birth],
+    ["Date of Birth", payload.date_of_birth],
+    ["Guardian", payload.guardian_name],
+    ["Last Semester Attended", payload.last_semester_attended],
+    ["Purpose", payload.purpose],
   ];
 
   for (const [field, value] of requiredFieldChecks) {
     if (!String(value || "").trim()) {
-      throw new Error(`Field ${field} is required`);
+      throw new Error(`${field} is required`);
+    }
+  }
+
+  const educationLabels: Record<string, string> = {
+    primary: "Primary",
+    elementary: "Elementary",
+    junior_high_school: "Junior High School",
+    senior_high_school: "Senior High School",
+  };
+  const requiredEducationFields: Array<
+    ["school_name" | "school_address" | "year_graduated", string]
+  > = [
+    ["school_name", "School Name"],
+    ["school_address", "School Address"],
+    ["year_graduated", "Year Graduated"],
+  ];
+  const educationEntries = Array.isArray(payload.educational_background)
+    ? payload.educational_background
+    : [];
+
+  for (const [level, label] of Object.entries(educationLabels)) {
+    const entry = educationEntries.find((item) => item?.level === level);
+
+    if (!entry) {
+      throw new Error(`${label} educational background is required`);
+    }
+
+    for (const [field, fieldLabel] of requiredEducationFields) {
+      if (!String(entry[field] || "").trim()) {
+        throw new Error(`${label} ${fieldLabel} is required`);
+      }
     }
   }
 
@@ -2057,7 +2231,9 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
   );
 
   if (!student) {
-    throw new Error("Student profile not found");
+    throw new Error(
+      "Your account is missing a student profile. Please contact the registrar or administrator to complete your student record before submitting a document request."
+    );
   }
 
   const documents: any[] = await sequelize.query(
@@ -2089,9 +2265,12 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     .filter(Boolean)
     .join(" ")
     .trim();
+  const normalizedCourseText =
+    String(payload.course_text || "").trim() || String(student.course_name || "").trim();
 
   const formSnapshot = {
     ...payload,
+    course_text: normalizedCourseText,
     delivery_method: payload.delivery_method,
   };
 
@@ -2339,6 +2518,15 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     });
   }
 
+  if (academicScope.registrar_user_id) {
+    await createWorkflowNotification({
+      userId: academicScope.registrar_user_id,
+      title: "Registrar review required",
+      message: `Request ${requestReference} was submitted by a student in your assigned academic scope.`,
+      status: "SUBMITTED",
+    });
+  }
+
   await createWorkflowNotification({
     userId: user.user_id,
     title: "Request submitted",
@@ -2381,11 +2569,29 @@ export const listWorkflowRequests = async (
     }
     whereClauses.push("wr.student_user_id = :userId");
     replacements.userId = user.user_id;
-  } else if (roles.includes("admin") || roles.includes("registrar")) {
+  } else if (roles.includes("admin")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.admin])) {
       throw new Error("Missing permission to list workflow requests");
     }
     // Operational staff can see the full queue.
+  } else if (roles.includes("registrar")) {
+    if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.registrar])) {
+      throw new Error("Missing permission to list registrar workflow requests");
+    }
+    whereClauses.push(`
+      EXISTS (
+        SELECT 1
+        FROM workflow_registrar_assignments wra
+        WHERE wra.user_id = :userId
+          AND wra.is_active = 1
+          AND (
+            wra.course_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.course_id')), '') AS UNSIGNED)
+            OR wra.department_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.department_id')), '') AS UNSIGNED)
+            OR wra.college_id = CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.academic_snapshot_json, '$.college_id')), '') AS UNSIGNED)
+          )
+      )
+    `);
+    replacements.userId = user.user_id;
   } else if (roles.includes("dean")) {
     if (!hasAnyPermission(user, [VIEW_PERMISSION_RULES.dean])) {
       throw new Error("Missing permission to list dean workflow queue");
@@ -2677,12 +2883,14 @@ export const advanceWorkflowRequest = async (
   const detail = await getRequestDetailInternal(workflowRequestId);
   const currentStatus = detail.current_status as WorkflowStatus;
   const allowedNext = WORKFLOW_TRANSITIONS[currentStatus] || [];
+  const roles = getRoleNames(user);
+
+  await assertCanViewWorkflowRequest(detail, user, roles);
 
   if (!allowedNext.includes(body.target_status)) {
     throw new Error(`Request cannot move from ${currentStatus} to ${body.target_status}`);
   }
 
-  const roles = getRoleNames(user);
   assertCanAdvance(user, roles, body.target_status);
 
   const approvalSnapshot = { ...detail.approval_snapshot };
@@ -2812,6 +3020,13 @@ export const advanceWorkflowRequest = async (
       feeSnapshot.assessed_at || new Date().toISOString();
     feeSnapshot.notes = remarks || feeSnapshot.notes || null;
 
+    const finalFee = resolveWorkflowFinalFee(feeSnapshot, detail.items || []);
+    if (finalFee <= 0) {
+      throw new Error(
+        "Payment stage is skipped for first-time free requests."
+      );
+    }
+
     paymentSnapshot.payment_status = "AWAITING_PAYMENT";
   }
 
@@ -2854,6 +3069,19 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
+    const finalFee = resolveWorkflowFinalFee(feeSnapshot, detail.items || []);
+
+    if (finalFee <= 0) {
+      paymentSnapshot.payment_status = "NOT_REQUIRED";
+      paymentSnapshot.confirmed_at =
+        paymentSnapshot.confirmed_at || new Date().toISOString();
+      paymentSnapshot.confirmed_by_name =
+        paymentSnapshot.confirmed_by_name || "System";
+      paymentSnapshot.confirmation_notes =
+        paymentSnapshot.confirmation_notes ||
+        "No payment required for first-time free request.";
+    }
+
     approvalSnapshot.registrar_processing_owner =
       updates.registrar_name ||
       approvalSnapshot.registrar_name ||
@@ -2865,10 +3093,13 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "READY_FOR_RELEASE") {
+    const readyForReleaseAt = new Date().toISOString();
     releaseSnapshot.expected_release_date =
       updates.expected_release_date ||
       releaseSnapshot.expected_release_date ||
       null;
+    releaseSnapshot.ready_for_release_at =
+      releaseSnapshot.ready_for_release_at || readyForReleaseAt;
     releaseSnapshot.release_method =
       updates.release_method ||
       releaseSnapshot.release_method ||
@@ -3172,10 +3403,14 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
+    const isPaymentSkipped = String(paymentSnapshot.payment_status || "").toUpperCase() === "NOT_REQUIRED";
+
     await createWorkflowNotification({
       userId: detail.student_user_id,
-      title: "Payment confirmed",
-      message: `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      title: isPaymentSkipped ? "No payment required" : "Payment confirmed",
+      message: isPaymentSkipped
+        ? `Request ${detail.request_reference} qualified for first-time free processing and moved to registrar processing.`
+        : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
       status: body.target_status,
     });
   }
@@ -3643,14 +3878,21 @@ export const processWorkflowAction = async (
   }
 
   if (action === "fee_assess") {
-    await advanceWorkflowRequest(workflowRequestId, user, {
+    const assessedDetail = await advanceWorkflowRequest(workflowRequestId, user, {
       target_status: "FEE_ASSESSED",
       remarks: input.remarks,
       updates: input.updates,
     });
 
+    const assessedFinalFee = resolveWorkflowFinalFee(
+      assessedDetail?.fee_snapshot || {},
+      assessedDetail?.items || []
+    );
+    const nextStatus: WorkflowStatus =
+      assessedFinalFee <= 0 ? "UNDER_REGISTRAR_PROCESSING" : "AWAITING_PAYMENT";
+
     return advanceWorkflowRequest(workflowRequestId, user, {
-      target_status: "AWAITING_PAYMENT",
+      target_status: nextStatus,
       remarks: input.remarks,
       updates: input.updates,
     });
