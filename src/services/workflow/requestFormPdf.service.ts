@@ -1,8 +1,13 @@
+import axios from "axios";
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../models";
+import {
+  removeLocalFileIfExists,
+  uploadLocalFileToCloudinary,
+} from "../../utils/cloudinaryStorage";
 
 type RequestItem = {
   document_type_id?: number;
@@ -46,6 +51,8 @@ type SchoolBranding = {
   school_short_name?: string | null;
   school_logo?: string | null;
 };
+
+type PdfImageSource = string | Buffer;
 
 const ensureDirectory = (directoryPath: string) => {
   if (!fs.existsSync(directoryPath)) {
@@ -99,6 +106,26 @@ const resolveUploadAssetPath = (assetPath?: string | null) => {
   const normalizedPath = assetPath.replace(/^\/+/, "").replace(/\//g, path.sep);
   const absolutePath = path.join(process.cwd(), normalizedPath);
   return fs.existsSync(absolutePath) ? absolutePath : null;
+};
+
+const loadUploadAssetSource = async (assetPath?: string | null): Promise<PdfImageSource | null> => {
+  if (!assetPath) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(assetPath)) {
+    try {
+      const response = await axios.get<ArrayBuffer>(assetPath, {
+        responseType: "arraybuffer",
+        timeout: 15000,
+      });
+      return Buffer.from(response.data);
+    } catch {
+      return null;
+    }
+  }
+
+  return resolveUploadAssetPath(assetPath);
 };
 
 const getSchoolBranding = async (): Promise<SchoolBranding> => {
@@ -545,12 +572,14 @@ const drawFallbackHeaderLogo = (doc: PDFKit.PDFDocument) => {
   });
 };
 
-const drawHeader = (doc: PDFKit.PDFDocument, branding: SchoolBranding) => {
-  const schoolLogoPath = resolveUploadAssetPath(branding.school_logo);
-
-  if (schoolLogoPath) {
+const drawHeader = (
+  doc: PDFKit.PDFDocument,
+  branding: SchoolBranding,
+  schoolLogoSource?: PdfImageSource | null
+) => {
+  if (schoolLogoSource) {
     try {
-      doc.image(schoolLogoPath, 50, 39, {
+      doc.image(schoolLogoSource, 50, 39, {
         fit: [56, 56],
         align: "center",
         valign: "center",
@@ -684,24 +713,23 @@ const drawSignatureApprovalField = (
   options: {
     label: string;
     name: string;
-    signaturePath?: string | null;
+    signatureSource?: PdfImageSource | null;
     x: number;
     y: number;
     width: number;
   }
 ) => {
-  const { label, name, signaturePath, x, y, width } = options;
+  const { label, name, signatureSource, x, y, width } = options;
   const lineY = y + 34;
-  const imagePath = resolveUploadAssetPath(signaturePath);
 
   doc.font("Helvetica-Bold").fontSize(9).fillColor("#111111").text(label, x, y, {
     width,
     align: "left",
   });
 
-  if (imagePath) {
+  if (signatureSource) {
     try {
-      doc.image(imagePath, x + 8, y + 6, {
+      doc.image(signatureSource, x + 8, y + 6, {
         fit: [Math.max(width - 16, 40), 22],
         align: "center",
         valign: "center",
@@ -732,6 +760,17 @@ export const generateRequestFormPdf = async (
   const absolutePath = path.join(uploadsDir, fileName);
   const relativePath = `/uploads/workflow/forms/${fileName}`;
   const branding = await getSchoolBranding();
+  const approvalSnapshot = request.approval_snapshot || {};
+  const paymentSnapshot = request.payment_snapshot || {};
+  const schoolLogoSource = await loadUploadAssetSource(branding.school_logo);
+  const signatureSources = {
+    treasurer: await loadUploadAssetSource(paymentSnapshot.confirmed_by_signature_file_path),
+    dean: await loadUploadAssetSource(approvalSnapshot.dean_signature_file_path),
+    registrar: await loadUploadAssetSource(approvalSnapshot.registrar_signature_file_path),
+    collegeAdmin: await loadUploadAssetSource(
+      approvalSnapshot.college_admin_signature_file_path
+    ),
+  };
   const uniqueItems = dedupeRequestItems(request.items || []);
   const groupedCatalog = groupItems(await loadDocumentCatalog()) as Record<
     string,
@@ -775,7 +814,7 @@ export const generateRequestFormPdf = async (
         .filter(Boolean)
         .join(", ");
 
-    drawHeader(doc, branding);
+    drawHeader(doc, branding, schoolLogoSource);
     doc
       .font("Helvetica-Bold")
       .fontSize(8)
@@ -1073,7 +1112,7 @@ export const generateRequestFormPdf = async (
       drawSignatureApprovalField(doc, {
         label: "Treasurer",
         name: upper(payment.confirmed_by_name || payment.official_receipt_no),
-        signaturePath: payment.confirmed_by_signature_file_path,
+        signatureSource: signatureSources.treasurer,
         x: LEFT + 18,
         y,
         width: 140,
@@ -1081,7 +1120,7 @@ export const generateRequestFormPdf = async (
       drawSignatureApprovalField(doc, {
         label: "College Department Head",
         name: upper(approval.dean_name),
-        signaturePath: approval.dean_signature_file_path,
+        signatureSource: signatureSources.dean,
         x: LEFT + 178,
         y,
         width: 150,
@@ -1089,7 +1128,7 @@ export const generateRequestFormPdf = async (
       drawSignatureApprovalField(doc, {
         label: "Registrar",
         name: upper(approval.registrar_name),
-        signaturePath: approval.registrar_signature_file_path,
+        signatureSource: signatureSources.registrar,
         x: LEFT + 348,
         y,
         width: 140,
@@ -1100,7 +1139,7 @@ export const generateRequestFormPdf = async (
     y += drawSignatureApprovalField(doc, {
       label: "College Administrator",
       name: upper(approval.college_admin_name),
-      signaturePath: approval.college_admin_signature_file_path,
+      signatureSource: signatureSources.collegeAdmin,
       x: LEFT + 140,
       y,
       width: 220,
@@ -1227,9 +1266,21 @@ export const generateRequestFormPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
+  const uploaded = await uploadLocalFileToCloudinary({
+    filePath: absolutePath,
+    fileName,
+    folder: "eregistrar/workflow/forms",
+    publicId: `${request.request_reference}_v${versionNumber}`,
+    resourceType: "raw",
+  });
+
+  if (uploaded.usedCloudinary) {
+    await removeLocalFileIfExists(absolutePath);
+  }
+
   return {
     fileName,
     absolutePath,
-    relativePath,
+    relativePath: uploaded.url || relativePath,
   };
 };

@@ -1,9 +1,14 @@
+import axios from "axios";
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../models";
+import {
+  removeLocalFileIfExists,
+  uploadLocalFileToCloudinary,
+} from "../../utils/cloudinaryStorage";
 
 type ClaimStubRequest = {
   request_reference: string;
@@ -25,6 +30,8 @@ type SchoolBranding = {
   school_name?: string | null;
   school_logo?: string | null;
 };
+
+type PdfImageSource = string | Buffer;
 
 const DEFAULT_SCHOOL_NAME = "TRINIDAD MUNICIPAL COLLEGE";
 const REGISTRAR_TITLE = "OFFICE OF THE REGISTRAR";
@@ -48,6 +55,26 @@ const resolveUploadAssetPath = (assetPath?: string | null) => {
   const normalizedPath = assetPath.replace(/^\/+/, "").replace(/\//g, path.sep);
   const absolutePath = path.join(process.cwd(), normalizedPath);
   return fs.existsSync(absolutePath) ? absolutePath : null;
+};
+
+const loadUploadAssetSource = async (assetPath?: string | null): Promise<PdfImageSource | null> => {
+  if (!assetPath) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(assetPath)) {
+    try {
+      const response = await axios.get<ArrayBuffer>(assetPath, {
+        responseType: "arraybuffer",
+        timeout: 15000,
+      });
+      return Buffer.from(response.data);
+    } catch {
+      return null;
+    }
+  }
+
+  return resolveUploadAssetPath(assetPath);
 };
 
 const getSchoolBranding = async (): Promise<SchoolBranding> => {
@@ -216,6 +243,7 @@ export const generateClaimStubPdf = async (
   });
   const qrImageBuffer = Buffer.from(qrDataUrl.split(",")[1], "base64");
   const branding = await getSchoolBranding();
+  const schoolLogoSource = await loadUploadAssetSource(branding.school_logo);
 
   await new Promise<void>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -234,10 +262,9 @@ export const generateClaimStubPdf = async (
         .filter(Boolean)
         .join(" ");
 
-    const schoolLogoPath = resolveUploadAssetPath(branding.school_logo);
-    if (schoolLogoPath) {
+    if (schoolLogoSource) {
       try {
-        doc.image(schoolLogoPath, 50, 39, {
+        doc.image(schoolLogoSource, 50, 39, {
           fit: [56, 56],
           align: "center",
           valign: "center",
@@ -338,9 +365,21 @@ export const generateClaimStubPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
+  const uploaded = await uploadLocalFileToCloudinary({
+    filePath: absolutePath,
+    fileName,
+    folder: "eregistrar/workflow/claim-stubs",
+    publicId: request.claim_stub_number,
+    resourceType: "raw",
+  });
+
+  if (uploaded.usedCloudinary) {
+    await removeLocalFileIfExists(absolutePath);
+  }
+
   return {
     fileName,
     absolutePath,
-    relativePath,
+    relativePath: uploaded.url || relativePath,
   };
 };

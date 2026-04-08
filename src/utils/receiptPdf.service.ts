@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
+import {
+  removeLocalFileIfExists,
+  uploadLocalFileToCloudinary,
+} from "./cloudinaryStorage";
 
 const formatPHP = (value: any) => {
   const amount = Number(value);
@@ -27,7 +31,8 @@ export const generateReceiptPDF = async (data: {
   fs.mkdirSync("uploads/receipts", { recursive: true });
 
   const doc = new PDFDocument({ margin: 40 });
-  doc.pipe(fs.createWriteStream(filePath));
+  const stream = fs.createWriteStream(filePath);
+  doc.pipe(stream);
 
   /* ================= HEADER ================= */
   doc.fontSize(14).text(data.school.school_name, { align: "center" });
@@ -91,5 +96,22 @@ export const generateReceiptPDF = async (data: {
 
   doc.end();
 
-  return `/uploads/receipts/${fileName}`;
+  await new Promise<void>((resolve, reject) => {
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+  });
+
+  const uploaded = await uploadLocalFileToCloudinary({
+    filePath,
+    fileName,
+    folder: "eregistrar/receipts",
+    publicId: data.receipt.receipt_reference,
+    resourceType: "raw",
+  });
+
+  if (uploaded.usedCloudinary) {
+    await removeLocalFileIfExists(filePath);
+  }
+
+  return uploaded.url;
 };

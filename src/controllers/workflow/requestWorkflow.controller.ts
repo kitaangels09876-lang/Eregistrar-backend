@@ -16,6 +16,10 @@ import {
 } from "../../services/workflow/requestWorkflow.service";
 import { WorkflowStatus } from "../../constants/workflow";
 import { WorkflowRequestPayload } from "../../types/workflow";
+import {
+  removeLocalFileIfExists,
+  uploadLocalFileToCloudinary,
+} from "../../utils/cloudinaryStorage";
 
 const resolveWorkflowErrorStatus = (error: unknown) => {
   const message =
@@ -83,14 +87,47 @@ const parseJsonObject = (value: unknown) => {
   return {};
 };
 
-const getWorkflowActionPayload = (req: Request) => {
+const uploadStoredFile = async (
+  file: Express.Multer.File | undefined,
+  options: {
+    folder: string;
+    publicId?: string;
+    resourceType?: "auto" | "image" | "raw";
+  }
+) => {
+  if (!file?.path) {
+    return null;
+  }
+
+  const uploaded = await uploadLocalFileToCloudinary({
+    filePath: file.path,
+    fileName: file.originalname || file.filename,
+    folder: options.folder,
+    publicId: options.publicId,
+    resourceType: options.resourceType,
+  });
+
+  if (uploaded.usedCloudinary) {
+    await removeLocalFileIfExists(file.path);
+  }
+
+  return uploaded;
+};
+
+const getWorkflowActionPayload = async (req: Request) => {
   const body = req.body || {};
   const updates = parseJsonObject(body.updates);
   const file = (req as Request & { file?: Express.Multer.File }).file;
 
   if (file) {
-    updates.signature_file_name = file.filename;
-    updates.signature_file_path = `/uploads/workflow/approval-signatures/${file.filename}`;
+    const uploaded = await uploadStoredFile(file, {
+      folder: "eregistrar/workflow/approval-signatures",
+      publicId: file.filename,
+      resourceType: "auto",
+    });
+
+    updates.signature_file_name = file.originalname || file.filename;
+    updates.signature_file_path = uploaded?.url;
   }
 
   return {
@@ -277,12 +314,12 @@ export const listWorkflowQueueHandler = (statuses: WorkflowStatus[]) => {
 const act = (action: string) => {
   return async (req: Request, res: Response) => {
     try {
-      const data = await processWorkflowAction(
-        Number(req.params.workflowRequestId || req.params.requestId),
-        getAuthUser(req),
-        action,
-        getWorkflowActionPayload(req)
-      );
+        const data = await processWorkflowAction(
+          Number(req.params.workflowRequestId || req.params.requestId),
+          getAuthUser(req),
+          action,
+          await getWorkflowActionPayload(req)
+        );
 
       return res.json({
         status: "success",
@@ -306,10 +343,15 @@ export const paymentConfirmHandler = act("payment_confirm");
 export const paymentSubmitHandler = async (req: Request, res: Response) => {
   try {
     const file = req.file;
+    const uploadedProof = await uploadStoredFile(file, {
+      folder: "eregistrar/workflow/payment-proofs",
+      publicId: file?.filename,
+      resourceType: "auto",
+    });
     const updates = {
       ...(req.body || {}),
-      proof_file_name: file?.filename || undefined,
-      proof_file_path: file ? `/uploads/workflow/payment-proofs/${file.filename}` : undefined,
+      proof_file_name: file?.originalname || file?.filename || undefined,
+      proof_file_path: uploadedProof?.url,
     };
 
     const data = await processWorkflowAction(

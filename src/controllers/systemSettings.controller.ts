@@ -1,6 +1,30 @@
 import { Request, Response } from "express";
 import { sequelize } from "../models";
 import { QueryTypes } from "sequelize";
+import {
+  removeLocalFileIfExists,
+  uploadLocalFileToCloudinary,
+} from "../utils/cloudinaryStorage";
+
+const uploadSystemAsset = async (file?: Express.Multer.File) => {
+  if (!file?.path) {
+    return null;
+  }
+
+  const uploaded = await uploadLocalFileToCloudinary({
+    filePath: file.path,
+    fileName: file.originalname || file.filename,
+    folder: "eregistrar/system",
+    publicId: file.fieldname,
+    resourceType: "image",
+  });
+
+  if (uploaded.usedCloudinary) {
+    await removeLocalFileIfExists(file.path);
+  }
+
+  return uploaded.url;
+};
 
 export const getSystemSettings = async (req: Request, res: Response) => {
   try {
@@ -91,17 +115,17 @@ export const updateSystemSettings = async (req: Request, res: Response) => {
 
       if (files.school_logo?.[0]) {
         updateFields.push("school_logo = :school_logo");
-        replacements.school_logo = `/uploads/system/${files.school_logo[0].filename}`;
+        replacements.school_logo = await uploadSystemAsset(files.school_logo[0]);
       }
 
       if (files.school_seal?.[0]) {
         updateFields.push("school_seal = :school_seal");
-        replacements.school_seal = `/uploads/system/${files.school_seal[0].filename}`;
+        replacements.school_seal = await uploadSystemAsset(files.school_seal[0]);
       }
 
       if (files.school_icon?.[0]) {
         updateFields.push("school_icon = :school_icon");
-        replacements.school_icon = `/uploads/system/${files.school_icon[0].filename}`;
+        replacements.school_icon = await uploadSystemAsset(files.school_icon[0]);
       }
     }
 
