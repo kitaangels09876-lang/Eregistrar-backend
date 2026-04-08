@@ -11,6 +11,7 @@ import { WorkflowRequestPayload } from "../../types/workflow";
 import { generateClaimStubPdf } from "./claimStubPdf.service";
 import { generateRequestFormPdf } from "./requestFormPdf.service";
 import { createNotification } from "../notification.service";
+import { sendEmail } from "../mail.service";
 import { logActivity } from "../../utils/auditlog.service";
 
 let schemaReady = false;
@@ -207,6 +208,543 @@ const createWorkflowNotification = async ({
   });
 };
 
+type WorkflowEmailRecipient = {
+  user_id: number;
+  email: string;
+  display_name: string;
+  account_type: string;
+  roles: string[];
+};
+
+const MAIL_REQUIRED_ENV_KEYS = [
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASS",
+] as const;
+
+const isWorkflowEmailConfigured = () =>
+  MAIL_REQUIRED_ENV_KEYS.every((key) => Boolean(process.env[key]?.trim()));
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const formatWorkflowStatusLabel = (status: string) =>
+  String(status || "")
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+
+const formatWorkflowCurrency = (value: number | null | undefined) => {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+  }).format(numericValue);
+};
+
+const parseRolesCsv = (value: unknown) =>
+  String(value || "")
+    .split(",")
+    .map((role) => role.trim().toLowerCase())
+    .filter(Boolean);
+
+const listWorkflowEmailRecipientsByUserIds = async (
+  userIds: number[]
+): Promise<WorkflowEmailRecipient[]> => {
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const rows: Array<{
+    user_id: number;
+    email: string;
+    account_type: string;
+    display_name: string | null;
+    roles_csv: string | null;
+  }> = await sequelize.query(
+    `
+    SELECT
+      u.user_id,
+      u.email,
+      u.account_type,
+      COALESCE(
+        NULLIF(
+          TRIM(
+            CASE
+              WHEN LOWER(COALESCE(u.account_type, '')) IN ('student', 'alumni')
+                THEN CONCAT_WS(' ', sp.first_name, sp.middle_name, sp.last_name)
+              ELSE CONCAT_WS(' ', ap.first_name, ap.middle_name, ap.last_name)
+            END
+          ),
+          ''
+        ),
+        u.email
+      ) AS display_name,
+      GROUP_CONCAT(DISTINCT LOWER(r.role_name) ORDER BY LOWER(r.role_name) SEPARATOR ',') AS roles_csv
+    FROM users u
+    LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+    LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+    LEFT JOIN user_roles ur ON ur.user_id = u.user_id
+    LEFT JOIN roles r ON r.role_id = ur.role_id
+    WHERE u.user_id IN (:userIds)
+      AND TRIM(COALESCE(u.email, '')) <> ''
+      AND LOWER(COALESCE(u.status, 'active')) = 'active'
+    GROUP BY
+      u.user_id,
+      u.email,
+      u.account_type,
+      sp.first_name,
+      sp.middle_name,
+      sp.last_name,
+      ap.first_name,
+      ap.middle_name,
+      ap.last_name
+    `,
+    {
+      replacements: { userIds },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return rows.map((row) => ({
+    user_id: Number(row.user_id),
+    email: String(row.email).trim(),
+    display_name: String(row.display_name || row.email).trim(),
+    account_type: String(row.account_type || "").trim().toLowerCase(),
+    roles: parseRolesCsv(row.roles_csv),
+  }));
+};
+
+const listWorkflowEmailRecipientsByRoles = async (
+  roles: string[]
+): Promise<WorkflowEmailRecipient[]> => {
+  if (roles.length === 0) {
+    return [];
+  }
+
+  const normalizedRoles = Array.from(new Set(normalizeRoles(roles)));
+
+  if (normalizedRoles.length === 0) {
+    return [];
+  }
+
+  const rows: Array<{
+    user_id: number;
+    email: string;
+    account_type: string;
+    display_name: string | null;
+    roles_csv: string | null;
+  }> = await sequelize.query(
+    `
+    SELECT
+      u.user_id,
+      u.email,
+      u.account_type,
+      COALESCE(
+        NULLIF(
+          TRIM(
+            CASE
+              WHEN LOWER(COALESCE(u.account_type, '')) IN ('student', 'alumni')
+                THEN CONCAT_WS(' ', sp.first_name, sp.middle_name, sp.last_name)
+              ELSE CONCAT_WS(' ', ap.first_name, ap.middle_name, ap.last_name)
+            END
+          ),
+          ''
+        ),
+        u.email
+      ) AS display_name,
+      GROUP_CONCAT(DISTINCT LOWER(r.role_name) ORDER BY LOWER(r.role_name) SEPARATOR ',') AS roles_csv
+    FROM users u
+    INNER JOIN user_roles ur ON ur.user_id = u.user_id
+    INNER JOIN roles r ON r.role_id = ur.role_id
+    LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+    LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+    WHERE LOWER(r.role_name) IN (:roles)
+      AND TRIM(COALESCE(u.email, '')) <> ''
+      AND LOWER(COALESCE(u.status, 'active')) = 'active'
+    GROUP BY
+      u.user_id,
+      u.email,
+      u.account_type,
+      sp.first_name,
+      sp.middle_name,
+      sp.last_name,
+      ap.first_name,
+      ap.middle_name,
+      ap.last_name
+    `,
+    {
+      replacements: { roles: normalizedRoles },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return rows.map((row) => ({
+    user_id: Number(row.user_id),
+    email: String(row.email).trim(),
+    display_name: String(row.display_name || row.email).trim(),
+    account_type: String(row.account_type || "").trim().toLowerCase(),
+    roles: parseRolesCsv(row.roles_csv),
+  }));
+};
+
+const dedupeWorkflowEmailRecipients = (recipients: WorkflowEmailRecipient[]) => {
+  const recipientMap = new Map<string, WorkflowEmailRecipient>();
+
+  for (const recipient of recipients) {
+    const emailKey = String(recipient.email || "").trim().toLowerCase();
+
+    if (!emailKey) {
+      continue;
+    }
+
+    if (!recipientMap.has(emailKey)) {
+      recipientMap.set(emailKey, recipient);
+      continue;
+    }
+
+    const existing = recipientMap.get(emailKey)!;
+    recipientMap.set(emailKey, {
+      ...existing,
+      roles: Array.from(new Set([...existing.roles, ...recipient.roles])).sort(),
+    });
+  }
+
+  return Array.from(recipientMap.values());
+};
+
+const resolveWorkflowEmailRecipients = async ({
+  userIds = [],
+  roles = [],
+}: {
+  userIds?: Array<number | null | undefined>;
+  roles?: string[];
+}) => {
+  const normalizedUserIds = Array.from(
+    new Set(
+      userIds
+        .map((userId) => Number(userId))
+        .filter((userId) => Number.isInteger(userId) && userId > 0)
+    )
+  );
+  const normalizedRoles = Array.from(new Set(normalizeRoles(roles)));
+  const [usersById, usersByRole] = await Promise.all([
+    listWorkflowEmailRecipientsByUserIds(normalizedUserIds),
+    listWorkflowEmailRecipientsByRoles(normalizedRoles),
+  ]);
+
+  return dedupeWorkflowEmailRecipients([...usersById, ...usersByRole]);
+};
+
+const getWorkflowPortalLink = (recipient: WorkflowEmailRecipient) => {
+  const frontendUrl = process.env.FRONTEND_URL?.trim();
+
+  if (!frontendUrl) {
+    return null;
+  }
+
+  const normalizedBaseUrl = frontendUrl.replace(/\/+$/, "");
+  const recipientRoles = normalizeRoles(recipient.roles);
+  const isPortalRecipient =
+    recipientRoles.some((role) =>
+      PORTAL_ROLES.includes(role as (typeof PORTAL_ROLES)[number])
+    ) ||
+    PORTAL_ROLES.includes(recipient.account_type as (typeof PORTAL_ROLES)[number]);
+
+  return `${normalizedBaseUrl}${isPortalRecipient ? "/student/workflow-requests" : "/admin/workflow"}`;
+};
+
+const sendWorkflowStatusEmails = async ({
+  requestReference,
+  status,
+  title,
+  message,
+  recipients,
+  detail,
+  remarks,
+}: {
+  requestReference: string;
+  status: WorkflowStatus;
+  title: string;
+  message: string;
+  recipients: WorkflowEmailRecipient[];
+  detail?: any;
+  remarks?: string | null;
+}) => {
+  if (!isWorkflowEmailConfigured() || recipients.length === 0) {
+    return;
+  }
+
+  const requestedBy = String(
+    detail?.academic_snapshot?.full_name || detail?.form_snapshot?.full_name || ""
+  ).trim();
+  const requestedDocuments = Array.from(
+    new Set(
+      Array.isArray(detail?.items)
+        ? detail.items
+            .map((item: any) => String(item?.document_name || "").trim())
+            .filter(Boolean)
+        : []
+    )
+  );
+  const statusLabel = formatWorkflowStatusLabel(status);
+
+  const deliveries = await Promise.allSettled(
+    recipients.map(async (recipient) => {
+      const portalLink = getWorkflowPortalLink(recipient);
+      const lines = [
+        `Hello ${recipient.display_name || recipient.email},`,
+        "",
+        message,
+        "",
+        `Request reference: ${requestReference}`,
+        `Current status: ${statusLabel}`,
+      ];
+
+      if (requestedBy) {
+        lines.push(`Requested by: ${requestedBy}`);
+      }
+
+      if (requestedDocuments.length > 0) {
+        lines.push(`Documents: ${requestedDocuments.join(", ")}`);
+      }
+
+      if (remarks) {
+        lines.push(`Remarks: ${remarks}`);
+      }
+
+      if (portalLink) {
+        lines.push(`Open request: ${portalLink}`);
+      }
+
+      const htmlSections = [
+        `<p>Hello ${escapeHtml(recipient.display_name || recipient.email)},</p>`,
+        `<p>${escapeHtml(message)}</p>`,
+        `<p><strong>Request reference:</strong> ${escapeHtml(requestReference)}<br /><strong>Current status:</strong> ${escapeHtml(statusLabel)}</p>`,
+      ];
+
+      if (requestedBy) {
+        htmlSections.push(
+          `<p><strong>Requested by:</strong> ${escapeHtml(requestedBy)}</p>`
+        );
+      }
+
+      if (requestedDocuments.length > 0) {
+        htmlSections.push(
+          `<p><strong>Documents:</strong> ${escapeHtml(requestedDocuments.join(", "))}</p>`
+        );
+      }
+
+      if (remarks) {
+        htmlSections.push(
+          `<p><strong>Remarks:</strong> ${escapeHtml(remarks)}</p>`
+        );
+      }
+
+      if (portalLink) {
+        htmlSections.push(
+          `<p><a href="${escapeHtml(portalLink)}">Open this request in eRegistrar</a></p>`
+        );
+      }
+
+      await sendEmail({
+        to: recipient.email,
+        subject: `eRegistrar: ${title} (${requestReference})`,
+        text: lines.join("\n"),
+        html: htmlSections.join(""),
+      });
+    })
+  );
+
+  deliveries.forEach((result) => {
+    if (result.status === "rejected") {
+      console.warn("WORKFLOW EMAIL DELIVERY FAILED:", result.reason);
+    }
+  });
+};
+
+const dispatchWorkflowStatusEmails = async ({
+  requestReference,
+  status,
+  title,
+  message,
+  userIds = [],
+  roles = [],
+  detail,
+  remarks,
+}: {
+  requestReference: string;
+  status: WorkflowStatus;
+  title: string;
+  message: string;
+  userIds?: Array<number | null | undefined>;
+  roles?: string[];
+  detail?: any;
+  remarks?: string | null;
+}) => {
+  if (!isWorkflowEmailConfigured()) {
+    return;
+  }
+
+  const recipients = await resolveWorkflowEmailRecipients({
+    userIds,
+    roles,
+  });
+
+  await sendWorkflowStatusEmails({
+    requestReference,
+    status,
+    title,
+    message,
+    recipients,
+    detail,
+    remarks,
+  });
+};
+
+const getStudentWorkflowEmailContent = ({
+  detail,
+  targetStatus,
+  remarks,
+  paymentSnapshot,
+  feeSnapshot,
+}: {
+  detail: any;
+  targetStatus: WorkflowStatus;
+  remarks?: string | null;
+  paymentSnapshot?: Record<string, any>;
+  feeSnapshot?: Record<string, any>;
+}) => {
+  const requestReference = detail.request_reference;
+  const finalFee = resolveWorkflowFinalFee(
+    feeSnapshot || detail.fee_snapshot || {},
+    detail.items || []
+  );
+  const feeText = formatWorkflowCurrency(finalFee);
+  const paymentStatus = String(
+    paymentSnapshot?.payment_status || detail.payment_snapshot?.payment_status || ""
+  ).toUpperCase();
+
+  switch (targetStatus) {
+    case "SUBMITTED":
+      return {
+        title: "Request submitted",
+        message: `Your request ${requestReference} has been submitted successfully.`,
+      };
+    case "UNDER_REGISTRAR_VERIFICATION":
+      return {
+        title: "Registrar verification started",
+        message: `Request ${requestReference} is now under registrar verification.`,
+      };
+    case "UNDER_DEAN_APPROVAL":
+      return {
+        title: "Awaiting dean approval",
+        message: `Request ${requestReference} passed registrar verification and is now awaiting dean approval.`,
+      };
+    case "DEAN_APPROVED":
+      return {
+        title: "Dean approved your request",
+        message: `Request ${requestReference} has been approved by the dean.`,
+      };
+    case "UNDER_COLLEGE_ADMIN_REVIEW":
+      return {
+        title: "Awaiting college review",
+        message: `Request ${requestReference} is now under college administration review.`,
+      };
+    case "COLLEGE_ADMIN_APPROVED":
+      return {
+        title: "College review completed",
+        message: `Request ${requestReference} has been approved by the college administration.`,
+      };
+    case "FEE_ASSESSED":
+      return {
+        title: "Fee assessed",
+        message: feeText
+          ? `The fee for request ${requestReference} has been assessed at ${feeText}.`
+          : `The fee for request ${requestReference} has been assessed.`,
+      };
+    case "AWAITING_PAYMENT":
+      return {
+        title: "Payment required",
+        message: feeText
+          ? `Request ${requestReference} is now awaiting payment. Amount due: ${feeText}.`
+          : `Request ${requestReference} is now awaiting payment submission.`,
+      };
+    case "PAYMENT_SUBMITTED":
+      return {
+        title: "Payment submitted",
+        message: `Payment proof for request ${requestReference} has been submitted and is awaiting confirmation.`,
+      };
+    case "PAYMENT_CONFIRMED":
+      return {
+        title: "Payment confirmed",
+        message: `Payment for request ${requestReference} has been confirmed.`,
+      };
+    case "UNDER_REGISTRAR_PROCESSING":
+      return {
+        title: paymentStatus === "NOT_REQUIRED" ? "No payment required" : "Registrar processing",
+        message:
+          paymentStatus === "NOT_REQUIRED"
+            ? `Request ${requestReference} qualified for first-time free processing and moved to registrar processing.`
+            : `Request ${requestReference} has moved to registrar processing.`,
+      };
+    case "DOCUMENT_GENERATION":
+      return {
+        title: "Document generation started",
+        message: `Request ${requestReference} is now in document generation.`,
+      };
+    case "READY_FOR_RELEASE":
+      return {
+        title: "Document ready for release",
+        message: `Request ${requestReference} is ready for release.`,
+      };
+    case "CLAIMED":
+      return {
+        title: "Document claimed",
+        message: `Request ${requestReference} has been claimed.`,
+      };
+    case "COMPLETED":
+      return {
+        title: "Request completed",
+        message: `Request ${requestReference} has been completed.`,
+      };
+    case "CANCELLED":
+      return {
+        title: "Request cancelled",
+        message: remarks
+          ? `Request ${requestReference} was cancelled. Reason: ${remarks}`
+          : `Request ${requestReference} was cancelled.`,
+      };
+    case "REJECTED":
+      return {
+        title: "Request rejected",
+        message: remarks
+          ? `Request ${requestReference} was rejected. Reason: ${remarks}`
+          : `Request ${requestReference} was rejected.`,
+      };
+    default:
+      return {
+        title: `Request status updated to ${formatWorkflowStatusLabel(targetStatus)}`,
+        message: `Request ${requestReference} is now ${formatWorkflowStatusLabel(
+          targetStatus
+        ).toLowerCase()}.`,
+      };
+  }
+};
+
 const AUTO_PAYMENT_TRANSITION_DELAY_SECONDS = 60;
 
 const promoteCollegeAdminApprovedRequests = async (
@@ -365,6 +903,8 @@ const promoteCollegeAdminApprovedRequests = async (
       );
     });
 
+    const updatedDetail = await getRequestDetailInternal(Number(row.workflow_request_id));
+
     if (shouldSkipPayment) {
       await createWorkflowNotification({
         userId: row.student_user_id,
@@ -372,12 +912,43 @@ const promoteCollegeAdminApprovedRequests = async (
         message: `Request ${row.request_reference} qualified for first-time free processing and moved to registrar processing.`,
         status: "UNDER_REGISTRAR_PROCESSING",
       });
+
+      await dispatchWorkflowStatusEmails({
+        userIds: [row.student_user_id],
+        requestReference: row.request_reference,
+        status: "UNDER_REGISTRAR_PROCESSING",
+        title: "No payment required",
+        message: `Request ${row.request_reference} qualified for first-time free processing and moved to registrar processing.`,
+        detail: updatedDetail,
+      });
+
+      const registrarScope = await resolveAcademicScope(
+        getWorkflowRequestAcademicScope(updatedDetail).course_id
+      );
+
+      await dispatchWorkflowStatusEmails({
+        userIds: [registrarScope.registrar_user_id],
+        requestReference: row.request_reference,
+        status: "UNDER_REGISTRAR_PROCESSING",
+        title: "Registrar processing required",
+        message: `Request ${row.request_reference} skipped payment and has moved to registrar processing.`,
+        detail: updatedDetail,
+      });
     } else {
       await createWorkflowNotification({
         userId: row.student_user_id,
         title: "Payment is now available",
         message: `Request ${row.request_reference} is now awaiting payment submission.`,
         status: "AWAITING_PAYMENT",
+      });
+
+      await dispatchWorkflowStatusEmails({
+        userIds: [row.student_user_id],
+        requestReference: row.request_reference,
+        status: "AWAITING_PAYMENT",
+        title: "Payment is now available",
+        message: `Request ${row.request_reference} is now awaiting payment submission.`,
+        detail: updatedDetail,
       });
     }
   }
@@ -2509,12 +3080,23 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     });
   }
 
+  const createdDetail = await getRequestDetailInternal(created.workflow_request_id);
+
   if (academicScope.dean_user_id) {
     await createWorkflowNotification({
       userId: academicScope.dean_user_id,
       title: "Dean approval required",
       message: `Request ${requestReference} is ready for registrar verification and dean routing.`,
       status: "SUBMITTED",
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [academicScope.dean_user_id],
+      requestReference,
+      status: "SUBMITTED",
+      title: "Dean approval required",
+      message: `Request ${requestReference} was submitted and will be routed for dean approval after registrar verification.`,
+      detail: createdDetail,
     });
   }
 
@@ -2525,6 +3107,15 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
       message: `Request ${requestReference} was submitted by a student in your assigned academic scope.`,
       status: "SUBMITTED",
     });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [academicScope.registrar_user_id],
+      requestReference,
+      status: "SUBMITTED",
+      title: "Registrar review required",
+      message: `Request ${requestReference} was submitted by a student in your assigned academic scope and is ready for review.`,
+      detail: createdDetail,
+    });
   }
 
   await createWorkflowNotification({
@@ -2534,7 +3125,16 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
     status: "SUBMITTED",
   });
 
-  return getRequestDetailInternal(created.workflow_request_id);
+  await dispatchWorkflowStatusEmails({
+    userIds: [user.user_id],
+    requestReference,
+    status: "SUBMITTED",
+    title: "Request submitted",
+    message: `Your request ${requestReference} has been submitted successfully.`,
+    detail: createdDetail,
+  });
+
+  return createdDetail;
 };
 
 export const listWorkflowRequests = async (
@@ -3345,6 +3945,32 @@ export const advanceWorkflowRequest = async (
     },
   });
 
+  const nextDetailForEmail = {
+    ...detail,
+    current_status: body.target_status,
+    approval_snapshot: approvalSnapshot,
+    fee_snapshot: feeSnapshot,
+    payment_snapshot: paymentSnapshot,
+    release_snapshot: releaseSnapshot,
+  };
+  const studentEmailContent = getStudentWorkflowEmailContent({
+    detail: nextDetailForEmail,
+    targetStatus: body.target_status,
+    remarks,
+    paymentSnapshot,
+    feeSnapshot,
+  });
+
+  await dispatchWorkflowStatusEmails({
+    userIds: [detail.student_user_id],
+    requestReference: detail.request_reference,
+    status: body.target_status,
+    title: studentEmailContent.title,
+    message: studentEmailContent.message,
+    detail: nextDetailForEmail,
+    remarks,
+  });
+
   if (body.target_status === "UNDER_DEAN_APPROVAL") {
     await createWorkflowNotification({
       userId: detail.student_user_id,
@@ -3358,6 +3984,16 @@ export const advanceWorkflowRequest = async (
       title: "Dean approval required",
       message: `Request ${detail.request_reference} is awaiting your approval.`,
       status: body.target_status,
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [nextDeanUserId],
+      requestReference: detail.request_reference,
+      status: body.target_status,
+      title: "Dean approval required",
+      message: `Request ${detail.request_reference} is awaiting your approval.`,
+      detail: nextDetailForEmail,
+      remarks,
     });
   }
 
@@ -3374,6 +4010,16 @@ export const advanceWorkflowRequest = async (
       title: "College review required",
       message: `Request ${detail.request_reference} is awaiting college administration review.`,
       status: body.target_status,
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [nextCollegeAdminUserId],
+      requestReference: detail.request_reference,
+      status: body.target_status,
+      title: "College review required",
+      message: `Request ${detail.request_reference} is awaiting college administration review.`,
+      detail: nextDetailForEmail,
+      remarks,
     });
   }
 
@@ -3400,10 +4046,23 @@ export const advanceWorkflowRequest = async (
       message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting treasurer confirmation.`,
       status: body.target_status,
     });
+
+    await dispatchWorkflowStatusEmails({
+      roles: ["treasurer"],
+      requestReference: detail.request_reference,
+      status: body.target_status,
+      title: "Payment confirmation required",
+      message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting treasurer confirmation.`,
+      detail: nextDetailForEmail,
+      remarks,
+    });
   }
 
   if (body.target_status === "UNDER_REGISTRAR_PROCESSING") {
     const isPaymentSkipped = String(paymentSnapshot.payment_status || "").toUpperCase() === "NOT_REQUIRED";
+    const registrarScope = await resolveAcademicScope(
+      getWorkflowRequestAcademicScope(nextDetailForEmail).course_id
+    );
 
     await createWorkflowNotification({
       userId: detail.student_user_id,
@@ -3412,6 +4071,18 @@ export const advanceWorkflowRequest = async (
         ? `Request ${detail.request_reference} qualified for first-time free processing and moved to registrar processing.`
         : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
       status: body.target_status,
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [registrarScope.registrar_user_id],
+      requestReference: detail.request_reference,
+      status: body.target_status,
+      title: "Registrar processing required",
+      message: isPaymentSkipped
+        ? `Request ${detail.request_reference} skipped payment and is now ready for registrar processing.`
+        : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      detail: nextDetailForEmail,
+      remarks,
     });
   }
 
