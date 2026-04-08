@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { Request, Response } from "express";
 import {
   advanceWorkflowRequest,
@@ -47,6 +49,44 @@ const resolveWorkflowErrorStatus = (error: unknown) => {
   }
 
   return 400;
+};
+
+const buildInlineFileName = (fileName?: string | null, fallback = "document.pdf") =>
+  (fileName || fallback).replace(/[\r\n"]/g, "").trim() || fallback;
+
+const sendInlineAsset = async (
+  res: Response,
+  assetPath: string,
+  fileName?: string | null
+) => {
+  const safeFileName = buildInlineFileName(fileName);
+
+  res.setHeader("Content-Disposition", `inline; filename="${safeFileName}"`);
+
+  if (/^https?:\/\//i.test(assetPath)) {
+    const assetResponse = await fetch(assetPath, { signal: AbortSignal.timeout(30000) });
+
+    if (!assetResponse.ok) {
+      throw new Error(`Unable to load file from storage (${assetResponse.status})`);
+    }
+
+    const contentType = assetResponse.headers.get("content-type") || "application/pdf";
+    const payload = Buffer.from(await assetResponse.arrayBuffer());
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", String(payload.byteLength));
+    return res.status(200).send(payload);
+  }
+
+  const normalizedPath = assetPath.replace(/^\/+/, "").replace(/\//g, path.sep);
+  const absolutePath = path.join(process.cwd(), normalizedPath);
+
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error("Stored file not found");
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  return res.sendFile(absolutePath);
 };
 
 const getAuthUser = (req: Request) => {
@@ -435,7 +475,7 @@ export const downloadWorkflowRequestLatestDocumentHandler = async (
       getAuthUser(req)
     );
 
-    return res.redirect(data.file_path);
+    return await sendInlineAsset(res, data.file_path, data.file_name);
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
@@ -476,7 +516,7 @@ export const downloadWorkflowRequestClaimStubHandler = async (
       getAuthUser(req)
     );
 
-    return res.redirect(data.file_path);
+    return await sendInlineAsset(res, data.file_path, data.file_name || data.claim_stub_number);
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
