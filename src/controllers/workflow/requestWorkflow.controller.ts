@@ -62,6 +62,7 @@ const sendInlineAsset = async (
   const safeFileName = buildInlineFileName(fileName);
 
   res.setHeader("Content-Disposition", `inline; filename="${safeFileName}"`);
+  res.setHeader("Content-Type", "application/pdf");
 
   if (/^https?:\/\//i.test(assetPath)) {
     const assetResponse = await fetch(assetPath, { signal: AbortSignal.timeout(30000) });
@@ -70,10 +71,8 @@ const sendInlineAsset = async (
       throw new Error(`Unable to load file from storage (${assetResponse.status})`);
     }
 
-    const contentType = assetResponse.headers.get("content-type") || "application/pdf";
     const payload = Buffer.from(await assetResponse.arrayBuffer());
 
-    res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", String(payload.byteLength));
     return res.status(200).send(payload);
   }
@@ -85,7 +84,6 @@ const sendInlineAsset = async (
     throw new Error("Stored file not found");
   }
 
-  res.setHeader("Content-Type", "application/pdf");
   return res.sendFile(absolutePath);
 };
 
