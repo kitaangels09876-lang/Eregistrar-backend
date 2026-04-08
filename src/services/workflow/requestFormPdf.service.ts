@@ -1055,27 +1055,16 @@ export const generateRequestFormPdf = async (
     );
 
     y += graduationRowHeight;
-    const semesterRowHeight = Math.max(
-      writeField({
-        namePrefix: "last_semester_attended",
-        label: "Last Semester Attended if Undergraduate:",
-        value: upper(form.last_semester_attended),
-        x: LEFT + 18,
-        y,
-        width: 302,
-        maxLines: 2,
-        baseFontSize: 8.5,
-      }),
-      writeField({
-        namePrefix: "semester_academic_year",
-        label: "Academic Year:",
-        value: upper(form.academic_year_label),
-        x: LEFT + 332,
-        y,
-        width: 170,
-        baseFontSize: 8.5,
-      })
-    );
+    const semesterRowHeight = writeField({
+      namePrefix: "last_semester_attended",
+      label: "Last Semester Attended if Undergraduate:",
+      value: upper(form.last_semester_attended),
+      x: LEFT + 18,
+      y,
+      width: 484,
+      maxLines: 2,
+      baseFontSize: 8.5,
+    });
 
     y += semesterRowHeight + 10;
     doc.font("Helvetica-Bold").fontSize(8.5).text("Please Checked type of Records Requested:", LEFT + 18, y);
@@ -1252,12 +1241,6 @@ export const generateRequestFormPdf = async (
     );
 
     y += claimMetaRowHeight;
-    doc.font("Helvetica-Bold").fontSize(9).text("Requirements to bring:", LEFT + 18, y);
-    for (let index = 0; index < 4; index += 1) {
-      const itemX = LEFT + 18 + index * 115;
-      doc.font("Helvetica").fontSize(9).text(`${index + 1}.`, itemX, y + 14);
-      strokeFieldLine(doc, itemX + 16, y + 25, 90);
-    }
 
     doc.end();
 

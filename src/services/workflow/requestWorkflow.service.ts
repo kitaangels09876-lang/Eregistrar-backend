@@ -3712,38 +3712,25 @@ export const advanceWorkflowRequest = async (
   }
 
   if (body.target_status === "CLAIMED") {
+    const claimantType = String(updates.claimant_type || "student").toLowerCase();
+    const isRepresentativeClaim = claimantType === "representative";
+
     releaseSnapshot.release_method = "pickup";
     releaseSnapshot.date_released = new Date().toISOString();
     releaseSnapshot.claimant_name =
       updates.claimant_name || releaseSnapshot.claimant_name || null;
-    releaseSnapshot.claimant_type =
-      updates.claimant_type || releaseSnapshot.claimant_type || "student";
+    releaseSnapshot.claimant_type = claimantType || "student";
     releaseSnapshot.claimant_relationship =
-      updates.claimant_relationship || releaseSnapshot.claimant_relationship || null;
-    releaseSnapshot.claimant_id_type =
-      updates.claimant_id_type || releaseSnapshot.claimant_id_type || null;
-    releaseSnapshot.claimant_id_number =
-      updates.claimant_id_number || releaseSnapshot.claimant_id_number || null;
-    releaseSnapshot.authorization_letter_file_path =
-      updates.authorization_letter_file_path ||
-      releaseSnapshot.authorization_letter_file_path ||
-      null;
-    releaseSnapshot.claimant_id_file_path =
-      updates.claimant_id_file_path || releaseSnapshot.claimant_id_file_path || null;
-    releaseSnapshot.signature_file_path =
-      updates.signature_file_path || releaseSnapshot.signature_file_path || null;
+      isRepresentativeClaim ? updates.claimant_relationship || null : null;
+    releaseSnapshot.claimant_id_type = null;
+    releaseSnapshot.claimant_id_number = null;
+    releaseSnapshot.authorization_letter_file_path = null;
+    releaseSnapshot.claimant_id_file_path = null;
+    releaseSnapshot.signature_file_path = null;
     releaseSnapshot.authorized_representative_name =
-      updates.authorized_representative_name ||
-      releaseSnapshot.authorized_representative_name ||
-      null;
-    releaseSnapshot.authorized_representative_id_type =
-      updates.authorized_representative_id_type ||
-      releaseSnapshot.authorized_representative_id_type ||
-      null;
-    releaseSnapshot.authorized_representative_id_number =
-      updates.authorized_representative_id_number ||
-      releaseSnapshot.authorized_representative_id_number ||
-      null;
+      isRepresentativeClaim ? updates.claimant_name || null : null;
+    releaseSnapshot.authorized_representative_id_type = null;
+    releaseSnapshot.authorized_representative_id_number = null;
     releaseSnapshot.claimed_by = releaseSnapshot.claimant_name;
     releaseSnapshot.release_status = "CLAIMED";
   }
@@ -4458,14 +4445,8 @@ export const confirmWorkflowClaimStub = async (
   }
 
   const claimantType = String(input.updates?.claimant_type || "student").toLowerCase();
-  if (
-    claimantType === "representative" &&
-    !(
-      input.updates?.authorization_letter_file_path ||
-      input.updates?.authorized_representative_name
-    )
-  ) {
-    throw new Error("Representative claim requires authorization details");
+  if (claimantType === "representative" && !input.updates?.claimant_relationship) {
+    throw new Error("Relationship to student is required for representative claims");
   }
 
   return processWorkflowAction(
@@ -4652,17 +4633,13 @@ export const processWorkflowAction = async (
 
   if (action === "release_claim") {
     const claimantType = String(input.updates?.claimant_type || "student").toLowerCase();
+    if (!input.updates?.claimant_name) {
+      throw new Error("Claimant name is required");
+    }
+
     if (claimantType === "representative") {
-      if (!input.updates?.claimant_name) {
-        throw new Error("Representative claimant name is required");
-      }
-
-      if (!input.updates?.claimant_id_type || !input.updates?.claimant_id_number) {
-        throw new Error("Representative ID type and ID number are required");
-      }
-
-      if (!input.updates?.authorization_letter_file_path) {
-        throw new Error("Authorization letter is required for representative claims");
+      if (!input.updates?.claimant_relationship) {
+        throw new Error("Relationship to student is required for representative claims");
       }
     }
 
@@ -4672,6 +4649,17 @@ export const processWorkflowAction = async (
       updates: {
         ...(input.updates || {}),
         release_method: "pickup",
+        claimant_relationship:
+          claimantType === "representative" ? input.updates?.claimant_relationship : null,
+        claimant_id_type: null,
+        claimant_id_number: null,
+        authorization_letter_file_path: null,
+        claimant_id_file_path: null,
+        signature_file_path: null,
+        authorized_representative_name:
+          claimantType === "representative" ? input.updates?.claimant_name : null,
+        authorized_representative_id_type: null,
+        authorized_representative_id_number: null,
       },
     });
   }

@@ -226,6 +226,56 @@ const line = (
   return underlineY - y + 5;
 };
 
+const drawFallbackHeaderLogo = (doc: PDFKit.PDFDocument) => {
+  doc.circle(78, 67, 28).fillAndStroke("#1f4b8f", "#153b6f");
+  doc.fillColor("#f5d062").circle(78, 58, 5).fill();
+  doc.fillColor("#ffffff").rect(66, 63, 24, 16).fill();
+  doc.fillColor("#b8860b").font("Helvetica-Bold").fontSize(14).text("TMC", 66, 66, {
+    width: 24,
+    align: "center",
+  });
+};
+
+const drawHeader = (
+  doc: PDFKit.PDFDocument,
+  branding: SchoolBranding,
+  schoolLogoSource?: PdfImageSource | null
+) => {
+  if (schoolLogoSource) {
+    try {
+      doc.image(schoolLogoSource, 50, 39, {
+        fit: [56, 56],
+        align: "center",
+        valign: "center",
+      });
+    } catch {
+      drawFallbackHeaderLogo(doc);
+    }
+  } else {
+    drawFallbackHeaderLogo(doc);
+  }
+
+  const schoolName = upper(branding.school_name) || DEFAULT_SCHOOL_NAME;
+  let schoolNameFontSize = 20;
+  while (schoolNameFontSize > 14) {
+    doc.font("Times-Bold").fontSize(schoolNameFontSize);
+    if (doc.widthOfString(schoolName) <= 360) {
+      break;
+    }
+    schoolNameFontSize -= 1;
+  }
+
+  doc.fillColor("#111111");
+  doc.font("Times-Bold").fontSize(schoolNameFontSize).text(schoolName, 118, 48, {
+    width: 360,
+    align: "center",
+  });
+  doc.font("Helvetica-Bold").fontSize(13).text(REGISTRAR_TITLE, 140, 74, {
+    width: 320,
+    align: "center",
+  });
+};
+
 export const generateClaimStubPdf = async (
   request: ClaimStubRequest
 ) => {
@@ -261,47 +311,7 @@ export const generateClaimStubPdf = async (
         .filter(Boolean)
         .join(" ");
 
-    if (schoolLogoSource) {
-      try {
-        doc.image(schoolLogoSource, 50, 39, {
-          fit: [56, 56],
-          align: "center",
-          valign: "center",
-        });
-      } catch {
-        doc.circle(78, 67, 28).fillAndStroke("#1f4b8f", "#153b6f");
-        doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(14).text("TMC", 64, 62, {
-          width: 28,
-          align: "center",
-        });
-      }
-    } else {
-      doc.circle(78, 67, 28).fillAndStroke("#1f4b8f", "#153b6f");
-      doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(14).text("TMC", 64, 62, {
-        width: 28,
-        align: "center",
-      });
-    }
-
-    const schoolName = upper(branding.school_name) || DEFAULT_SCHOOL_NAME;
-    let schoolNameFontSize = 20;
-    while (schoolNameFontSize > 14) {
-      doc.font("Times-Bold").fontSize(schoolNameFontSize);
-      if (doc.widthOfString(schoolName) <= 370) {
-        break;
-      }
-      schoolNameFontSize -= 1;
-    }
-
-    doc.fillColor("#111111");
-    doc.font("Times-Bold").fontSize(schoolNameFontSize).text(schoolName, 110, 48, {
-      width: 370,
-      align: "center",
-    });
-    doc.font("Helvetica-Bold").fontSize(13).text(REGISTRAR_TITLE, 138, 74, {
-      width: 320,
-      align: "center",
-    });
+    drawHeader(doc, branding, schoolLogoSource);
 
     doc.font("Helvetica-Bold").fontSize(16).text("CLAIM STUB / CLAIM RECEIPT", 0, 118, {
       width: 595,
@@ -329,9 +339,9 @@ export const generateClaimStubPdf = async (
     doc.font("Helvetica-Bold").fontSize(10).text("CLAIM INSTRUCTIONS", 48, y);
     y += 18;
     doc.font("Helvetica").fontSize(9).text(
-      "1. Present this claim stub and one valid ID at the Registrar Office.\n" +
-        "2. If a representative will claim, bring an authorization letter and representative ID.\n" +
-        "3. Claim is subject to registrar verification and release eligibility.\n" +
+      "1. Present this claim stub at the Registrar Office pickup desk.\n" +
+        "2. If an authorized representative will claim, declare the relationship to the student during verification.\n" +
+        "3. Release remains subject to registrar verification and release eligibility.\n" +
         "4. This stub becomes invalid once the request is claimed, cancelled, rejected, or completed.",
       48,
       y,
