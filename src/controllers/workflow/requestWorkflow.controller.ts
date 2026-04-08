@@ -68,6 +68,15 @@ const sendInlineAsset = async (
     const assetResponse = await fetch(assetPath, { signal: AbortSignal.timeout(30000) });
 
     if (!assetResponse.ok) {
+      if (
+        assetResponse.status === 401 &&
+        /cloudinary\.com/i.test(assetPath)
+      ) {
+        throw new Error(
+          "PDF delivery is blocked by Cloudinary. Enable 'Allow delivery of PDF and ZIP files' in your Cloudinary security settings or use a paid plan."
+        );
+      }
+
       throw new Error(`Unable to load file from storage (${assetResponse.status})`);
     }
 
