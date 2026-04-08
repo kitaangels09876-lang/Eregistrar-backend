@@ -253,6 +253,11 @@ const formatWorkflowCurrency = (value: number | null | undefined) => {
   }).format(numericValue);
 };
 
+const isCloudinaryAssetUrl = (value: unknown) =>
+  typeof value === "string" &&
+  /^https?:\/\//i.test(value) &&
+  /cloudinary\.com/i.test(value);
+
 const parseRolesCsv = (value: unknown) =>
   String(value || "")
     .split(",")
@@ -2371,7 +2376,7 @@ const getRequestDetailInternal = async (workflowRequestId: number) => {
     }
   );
 
-  const [document]: any[] = await sequelize.query(
+  let [document]: any[] = await sequelize.query(
     `
     SELECT *
     FROM workflow_generated_documents
@@ -4166,7 +4171,7 @@ export const getWorkflowRequestLatestDocument = async (
     }
   }
 
-  const [document]: any[] = await sequelize.query(
+  let [document]: any[] = await sequelize.query(
     `
     SELECT *
     FROM workflow_generated_documents
@@ -4182,6 +4187,28 @@ export const getWorkflowRequestLatestDocument = async (
 
   if (!document) {
     throw new Error("No generated request form is available");
+  }
+
+  if (isCloudinaryAssetUrl(document.file_path) && user?.user_id) {
+    await regenerateDocument(workflowRequestId, user.user_id);
+
+    const [regenerated]: any[] = await sequelize.query(
+      `
+      SELECT *
+      FROM workflow_generated_documents
+      WHERE workflow_request_id = :workflowRequestId
+      ORDER BY version_number DESC
+      LIMIT 1
+      `,
+      {
+        replacements: { workflowRequestId },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (regenerated) {
+      document = regenerated;
+    }
   }
 
   if (user) {

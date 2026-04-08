@@ -5,7 +5,6 @@ import PDFDocument from "pdfkit";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../models";
 import {
-  removeLocalFileIfExists,
   uploadLocalFileToCloudinary,
 } from "../../utils/cloudinaryStorage";
 
@@ -1266,7 +1265,7 @@ export const generateRequestFormPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  const uploaded = await uploadLocalFileToCloudinary({
+  await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
     mimeType: "application/pdf",
@@ -1275,13 +1274,9 @@ export const generateRequestFormPdf = async (
     resourceType: "image",
   });
 
-  if (uploaded.usedCloudinary) {
-    await removeLocalFileIfExists(absolutePath);
-  }
-
   return {
     fileName,
     absolutePath,
-    relativePath: uploaded.url || relativePath,
+    relativePath,
   };
 };

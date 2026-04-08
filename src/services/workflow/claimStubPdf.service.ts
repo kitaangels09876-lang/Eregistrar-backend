@@ -6,7 +6,6 @@ import QRCode from "qrcode";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../models";
 import {
-  removeLocalFileIfExists,
   uploadLocalFileToCloudinary,
 } from "../../utils/cloudinaryStorage";
 
@@ -365,7 +364,7 @@ export const generateClaimStubPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  const uploaded = await uploadLocalFileToCloudinary({
+  await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
     mimeType: "application/pdf",
@@ -374,13 +373,9 @@ export const generateClaimStubPdf = async (
     resourceType: "image",
   });
 
-  if (uploaded.usedCloudinary) {
-    await removeLocalFileIfExists(absolutePath);
-  }
-
   return {
     fileName,
     absolutePath,
-    relativePath: uploaded.url || relativePath,
+    relativePath,
   };
 };

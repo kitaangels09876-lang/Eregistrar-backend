@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import {
-  removeLocalFileIfExists,
   uploadLocalFileToCloudinary,
 } from "./cloudinaryStorage";
 
@@ -101,7 +100,7 @@ export const generateReceiptPDF = async (data: {
     stream.on("error", reject);
   });
 
-  const uploaded = await uploadLocalFileToCloudinary({
+  await uploadLocalFileToCloudinary({
     filePath,
     fileName,
     mimeType: "application/pdf",
@@ -110,9 +109,5 @@ export const generateReceiptPDF = async (data: {
     resourceType: "image",
   });
 
-  if (uploaded.usedCloudinary) {
-    await removeLocalFileIfExists(filePath);
-  }
-
-  return uploaded.url;
+  return `/${filePath.replace(/\\/g, "/")}`;
 };
