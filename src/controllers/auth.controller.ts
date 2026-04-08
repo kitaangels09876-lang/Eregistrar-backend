@@ -11,12 +11,13 @@ import { generateToken } from '../config/jwt.config';
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 import { resolveEffectiveAccountType } from "../utils/resolveAccountType";
 import { getPermissionsForRoles } from "../services/auth/permission.service";
-import {
-  buildEmailVerificationUrl,
-  generateEmailVerificationToken,
-  sendEmailVerificationEmail,
-  verifyEmailVerificationToken,
-} from "../services/emailVerification.service";
+  import {
+    buildEmailVerificationUrl,
+    generateEmailVerificationToken,
+    sendEmailVerificationEmail,
+    verifyEmailVerificationToken,
+  } from "../services/emailVerification.service";
+  import { sendEmail } from "../services/mail.service";
 import {
   sendSingleFieldValidationError,
   sendValidationError,
@@ -37,13 +38,26 @@ import {
 const isProductionEnvironment = (): boolean =>
   process.env.NODE_ENV === "production";
 
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
+  const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) {
+      return error.message;
+    }
 
   return "Unknown error";
-};
+  };
+
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const buildSmtpDebugSummary = () => ({
+    host: process.env.SMTP_HOST?.trim() || null,
+    port: process.env.SMTP_PORT?.trim() || null,
+    secure:
+      (process.env.SMTP_SECURE ?? "").trim() !== ""
+        ? String(process.env.SMTP_SECURE).trim().toLowerCase() === "true"
+        : null,
+    user: process.env.SMTP_USER?.trim() || null,
+    from: process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || null,
+  });
 
 const getVerificationUrlForUser = (userId: number, email: string): string =>
   buildEmailVerificationUrl(
@@ -1137,6 +1151,84 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
     return res.status(500).json({
       status: "error",
       message: "Failed to send verification email",
+    });
+  }
+};
+
+export const testSmtpConnection = async (req: Request, res: Response) => {
+  try {
+    const authenticatedEmail =
+      typeof req.user?.email === "string" ? req.user.email.trim().toLowerCase() : "";
+    const requestedEmail =
+      typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    const email = requestedEmail || authenticatedEmail;
+
+    if (!email) {
+      return res.status(400).json({
+        status: "error",
+        message: "Email address is required for SMTP test delivery.",
+      });
+    }
+
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Enter a valid email address for SMTP testing.",
+      });
+    }
+
+    const smtpSummary = buildSmtpDebugSummary();
+
+    await sendEmail({
+      to: email,
+      subject: "eRegistrar SMTP test email",
+      text: `Hello,
+
+This is a test email from eRegistrar.
+
+Sent at: ${new Date().toISOString()}
+SMTP host: ${smtpSummary.host || "not configured"}
+SMTP port: ${smtpSummary.port || "not configured"}
+SMTP secure: ${smtpSummary.secure === null ? "not configured" : String(smtpSummary.secure)}
+From address: ${smtpSummary.from || "not configured"}
+`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #1f2937;">
+          <h2 style="margin-bottom: 16px;">eRegistrar SMTP test email</h2>
+          <p style="margin-bottom: 16px;">Hello,</p>
+          <p style="margin-bottom: 16px;">This is a test email from eRegistrar.</p>
+          <p style="margin-bottom: 8px;"><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+          <p style="margin-bottom: 8px;"><strong>SMTP host:</strong> ${smtpSummary.host || "not configured"}</p>
+          <p style="margin-bottom: 8px;"><strong>SMTP port:</strong> ${smtpSummary.port || "not configured"}</p>
+          <p style="margin-bottom: 8px;"><strong>SMTP secure:</strong> ${
+            smtpSummary.secure === null ? "not configured" : String(smtpSummary.secure)
+          }</p>
+          <p style="margin-bottom: 8px;"><strong>From address:</strong> ${smtpSummary.from || "not configured"}</p>
+        </div>
+      `,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: `SMTP test email sent successfully to ${email}.`,
+      data: {
+        to: email,
+        smtp: smtpSummary,
+      },
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    const smtpSummary = buildSmtpDebugSummary();
+
+    console.error("SMTP TEST EMAIL ERROR:", message);
+
+    return res.status(503).json({
+      status: "error",
+      message: "SMTP test email failed.",
+      error_detail: message,
+      data: {
+        smtp: smtpSummary,
+      },
     });
   }
 };
