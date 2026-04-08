@@ -99,19 +99,25 @@ const uploadStoredFile = async (
     return null;
   }
 
-  const uploaded = await uploadLocalFileToCloudinary({
-    filePath: file.path,
-    fileName: file.originalname || file.filename,
-    folder: options.folder,
-    publicId: options.publicId,
-    resourceType: options.resourceType,
-  });
+  try {
+    const uploaded = await uploadLocalFileToCloudinary({
+      filePath: file.path,
+      fileName: file.originalname || file.filename,
+      mimeType: file.mimetype,
+      folder: options.folder,
+      publicId: options.publicId,
+      resourceType: options.resourceType,
+    });
 
-  if (uploaded.usedCloudinary) {
+    if (uploaded.usedCloudinary) {
+      await removeLocalFileIfExists(file.path);
+    }
+
+    return uploaded;
+  } catch (error) {
     await removeLocalFileIfExists(file.path);
+    throw error;
   }
-
-  return uploaded;
 };
 
 const getWorkflowActionPayload = async (req: Request) => {
@@ -160,6 +166,24 @@ export const createWorkflowRequestHandler = async (req: Request, res: Response) 
     };
 
     const body = req.body || {};
+    const attachments = await Promise.all(
+      files.map(async (file) => {
+        const uploaded = await uploadStoredFile(file, {
+          folder: "eregistrar/workflow/request-attachments",
+          publicId: file.filename,
+          resourceType: "image",
+        });
+
+        return {
+          original_file_name: file.originalname,
+          stored_file_name: uploaded?.publicId || file.filename,
+          file_path: uploaded?.url || file.path,
+          mime_type: file.mimetype,
+          file_size: file.size,
+        };
+      })
+    );
+
     const payload: WorkflowRequestPayload = {
       civil_status: body.civil_status || "",
       gender: body.gender || "",
@@ -179,13 +203,7 @@ export const createWorkflowRequestHandler = async (req: Request, res: Response) 
       delivery_method: "pickup",
       requested_document_ids: parseField<number[]>(body.requested_document_ids, []).map(Number),
       educational_background: parseField(body.educational_background, []),
-      attachments: files.map((file) => ({
-        original_file_name: file.originalname,
-        stored_file_name: file.filename,
-        file_path: `/uploads/workflow/request-attachments/${file.filename}`,
-        mime_type: file.mimetype,
-        file_size: file.size,
-      })),
+      attachments,
     };
 
     const data = await createWorkflowRequest(getAuthUser(req), payload);
@@ -510,17 +528,35 @@ export const claimVerificationConfirmHandler = async (req: Request, res: Respons
     const authorizationLetter = files.authorization_letter?.[0];
     const claimantIdImage = files.claimant_id_image?.[0];
     const signatureCapture = files.signature_capture?.[0];
+    const [uploadedAuthorizationLetter, uploadedClaimantIdImage, uploadedSignatureCapture] =
+      await Promise.all([
+        uploadStoredFile(authorizationLetter, {
+          folder: "eregistrar/workflow/claim-files",
+          publicId: authorizationLetter?.filename,
+          resourceType: "image",
+        }),
+        uploadStoredFile(claimantIdImage, {
+          folder: "eregistrar/workflow/claim-files",
+          publicId: claimantIdImage?.filename,
+          resourceType: "image",
+        }),
+        uploadStoredFile(signatureCapture, {
+          folder: "eregistrar/workflow/claim-files",
+          publicId: signatureCapture?.filename,
+          resourceType: "image",
+        }),
+      ]);
 
     const updates = {
       ...(req.body || {}),
       authorization_letter_file_path: authorizationLetter
-        ? `/uploads/workflow/claim-files/${authorizationLetter.filename}`
+        ? uploadedAuthorizationLetter?.url
         : undefined,
       claimant_id_file_path: claimantIdImage
-        ? `/uploads/workflow/claim-files/${claimantIdImage.filename}`
+        ? uploadedClaimantIdImage?.url
         : undefined,
       signature_file_path: signatureCapture
-        ? `/uploads/workflow/claim-files/${signatureCapture.filename}`
+        ? uploadedSignatureCapture?.url
         : undefined,
     };
 

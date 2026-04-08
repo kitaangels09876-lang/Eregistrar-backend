@@ -104,9 +104,10 @@ export const generateReceiptPDF = async (data: {
   const uploaded = await uploadLocalFileToCloudinary({
     filePath,
     fileName,
+    mimeType: "application/pdf",
     folder: "eregistrar/receipts",
     publicId: data.receipt.receipt_reference,
-    resourceType: "raw",
+    resourceType: "image",
   });
 
   if (uploaded.usedCloudinary) {

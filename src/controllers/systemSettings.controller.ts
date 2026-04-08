@@ -11,19 +11,25 @@ const uploadSystemAsset = async (file?: Express.Multer.File) => {
     return null;
   }
 
-  const uploaded = await uploadLocalFileToCloudinary({
-    filePath: file.path,
-    fileName: file.originalname || file.filename,
-    folder: "eregistrar/system",
-    publicId: file.fieldname,
-    resourceType: "image",
-  });
+  try {
+    const uploaded = await uploadLocalFileToCloudinary({
+      filePath: file.path,
+      fileName: file.originalname || file.filename,
+      mimeType: file.mimetype,
+      folder: "eregistrar/system",
+      publicId: file.fieldname,
+      resourceType: "image",
+    });
 
-  if (uploaded.usedCloudinary) {
+    if (uploaded.usedCloudinary) {
+      await removeLocalFileIfExists(file.path);
+    }
+
+    return uploaded.url;
+  } catch (error) {
     await removeLocalFileIfExists(file.path);
+    throw error;
   }
-
-  return uploaded.url;
 };
 
 export const getSystemSettings = async (req: Request, res: Response) => {

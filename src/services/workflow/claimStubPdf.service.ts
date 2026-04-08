@@ -368,9 +368,10 @@ export const generateClaimStubPdf = async (
   const uploaded = await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
+    mimeType: "application/pdf",
     folder: "eregistrar/workflow/claim-stubs",
     publicId: request.claim_stub_number,
-    resourceType: "raw",
+    resourceType: "image",
   });
 
   if (uploaded.usedCloudinary) {

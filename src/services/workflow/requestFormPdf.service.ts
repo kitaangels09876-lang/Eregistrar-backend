@@ -1269,9 +1269,10 @@ export const generateRequestFormPdf = async (
   const uploaded = await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
+    mimeType: "application/pdf",
     folder: "eregistrar/workflow/forms",
     publicId: `${request.request_reference}_v${versionNumber}`,
-    resourceType: "raw",
+    resourceType: "image",
   });
 
   if (uploaded.usedCloudinary) {

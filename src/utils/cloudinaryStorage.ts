@@ -1,4 +1,3 @@
-import axios from "axios";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
@@ -9,6 +8,7 @@ type UploadLocalFileOptions = {
   filePath: string;
   folder: string;
   fileName?: string;
+  mimeType?: string;
   publicId?: string;
   resourceType?: CloudinaryResourceType;
   overwrite?: boolean;
@@ -28,7 +28,11 @@ const isConfigured = () => Boolean(cloudName && apiKey && apiSecret);
 
 const normalizeFolder = (folder: string) => folder.replace(/^\/+|\/+$/g, "");
 
-const inferMimeType = (fileName: string) => {
+const inferMimeType = (fileName: string, mimeType?: string) => {
+  if (mimeType) {
+    return mimeType;
+  }
+
   const ext = path.extname(fileName).toLowerCase();
 
   switch (ext) {
@@ -42,6 +46,19 @@ const inferMimeType = (fileName: string) => {
     default:
       return "application/octet-stream";
   }
+};
+
+const inferResourceType = (fileName: string, mimeType?: string): CloudinaryResourceType => {
+  const normalizedMimeType = inferMimeType(fileName, mimeType).toLowerCase();
+
+  if (
+    normalizedMimeType === "application/pdf" ||
+    normalizedMimeType.startsWith("image/")
+  ) {
+    return "image";
+  }
+
+  return "raw";
 };
 
 const sanitizePublicId = (value: string) =>
@@ -80,8 +97,9 @@ export const uploadLocalFileToCloudinary = async (
     filePath,
     folder,
     fileName = path.basename(filePath),
+    mimeType,
     publicId = `${sanitizePublicId(fileName)}-${Date.now()}`,
-    resourceType = "auto",
+    resourceType = inferResourceType(fileName, mimeType),
     overwrite = true,
   } = options;
 
@@ -103,28 +121,51 @@ export const uploadLocalFileToCloudinary = async (
   };
   const signature = buildSignature(signedParams);
   const buffer = await fs.promises.readFile(filePath);
-  const body = new URLSearchParams();
+  const formData = new FormData();
 
-  body.set("file", `data:${inferMimeType(fileName)};base64,${buffer.toString("base64")}`);
-  body.set("api_key", apiKey as string);
-  body.set("folder", normalizedFolder);
-  body.set("overwrite", signedParams.overwrite);
-  body.set("public_id", signedParams.public_id);
-  body.set("signature", signature);
-  body.set("timestamp", timestamp);
+  formData.append(
+    "file",
+    new Blob([buffer], { type: inferMimeType(fileName, mimeType) }),
+    fileName
+  );
+  formData.append("api_key", apiKey as string);
+  formData.append("folder", normalizedFolder);
+  formData.append("overwrite", signedParams.overwrite);
+  formData.append("public_id", signedParams.public_id);
+  formData.append("signature", signature);
+  formData.append("timestamp", timestamp);
 
   const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
-  const response = await axios.post(endpoint, body.toString(), {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
+  const response = await fetch(endpoint, {
+    method: "POST",
+    body: formData,
+    signal: AbortSignal.timeout(30000),
   });
+  const responseData = (await response.json().catch(() => null)) as
+    | {
+        public_id?: string;
+        secure_url?: string;
+        url?: string;
+        error?: { message?: string };
+      }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      responseData?.error?.message ||
+        `Cloudinary upload failed with status ${response.status}`
+    );
+  }
+
+  const assetUrl = responseData?.secure_url || responseData?.url;
+
+  if (!assetUrl) {
+    throw new Error("Cloudinary upload succeeded without returning a file URL");
+  }
 
   return {
-    publicId: response.data?.public_id || signedParams.public_id,
-    url: response.data?.secure_url || response.data?.url,
+    publicId: responseData?.public_id || signedParams.public_id,
+    url: assetUrl,
     usedCloudinary: true,
   };
 };
