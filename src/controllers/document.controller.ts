@@ -3,12 +3,38 @@ import { DocumentType } from "../models";
 import { Op } from "sequelize";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 
+const parseBooleanQuery = (value: unknown): boolean | undefined => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (["true", "1", "yes", "active"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "inactive"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return undefined;
+};
+
 export const getAllDocuments = async (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const search = (req.query.search as string) || "";
-    const isActive = req.query.is_active;
+    const isActive = parseBooleanQuery(req.query.is_active);
 
     const offset = (page - 1) * limit;
 
@@ -21,7 +47,7 @@ export const getAllDocuments = async (req: Request, res: Response) => {
       ];
     }
 
-    if (isActive !== undefined) {
+    if (typeof isActive === "boolean") {
       whereCondition.is_active = isActive;
     }
 
