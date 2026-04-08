@@ -1,5 +1,3 @@
-import nodemailer from "nodemailer";
-
 interface MailPayload {
   to: string;
   subject: string;
@@ -7,16 +5,7 @@ interface MailPayload {
   html: string;
 }
 
-interface MailConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  pass: string;
-  from: string;
-}
-
-let transporter: nodemailer.Transporter | null = null;
+const RESEND_API_BASE_URL = "https://api.resend.com";
 
 const getRequiredEnv = (key: string): string => {
   const value = process.env[key]?.trim();
@@ -28,47 +17,19 @@ const getRequiredEnv = (key: string): string => {
   return value;
 };
 
-const getMailConfig = (): MailConfig => {
-  const host = getRequiredEnv("SMTP_HOST");
-  const port = Number(getRequiredEnv("SMTP_PORT"));
-  const user = getRequiredEnv("SMTP_USER");
-  const pass = getRequiredEnv("SMTP_PASS");
-  const from = process.env.SMTP_FROM?.trim() || user;
-  const secure =
-    (process.env.SMTP_SECURE ?? String(port === 465)).toLowerCase() === "true";
+const getOptionalEnv = (key: string): string =>
+  process.env[key]?.trim() || "";
 
-  if (Number.isNaN(port)) {
-    throw new Error("SMTP_PORT must be a valid number");
-  }
+const getResendConfig = () => {
+  const apiKey = getRequiredEnv("RESEND_API_KEY");
+  const from = getRequiredEnv("RESEND_FROM");
+  const replyTo = getOptionalEnv("RESEND_REPLY_TO");
 
   return {
-    host,
-    port,
-    secure,
-    user,
-    pass,
+    apiKey,
     from,
+    replyTo,
   };
-};
-
-const getTransporter = (): nodemailer.Transporter => {
-  if (transporter) {
-    return transporter;
-  }
-
-  const config = getMailConfig();
-
-  transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-  });
-
-  return transporter;
 };
 
 export const sendEmail = async ({
@@ -77,26 +38,50 @@ export const sendEmail = async ({
   text,
   html,
 }: MailPayload): Promise<void> => {
-  const config = getMailConfig();
+  const config = getResendConfig();
 
   try {
-    await getTransporter().sendMail({
-      from: config.from,
-      to,
-      subject,
-      text,
-      html,
+    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: config.from,
+        to: [to],
+        subject,
+        text,
+        html,
+        ...(config.replyTo ? { reply_to: config.replyTo } : {}),
+      }),
+      signal: AbortSignal.timeout(30000),
     });
-  } catch (error) {
-    const errorCode =
-      typeof error === "object" && error !== null && "code" in error
-        ? String((error as { code?: string }).code)
-        : "";
 
-    if (errorCode === "ENOTFOUND" || errorCode === "EDNS") {
+    const responseData = (await response.json().catch(() => null)) as
+      | {
+          id?: string;
+          message?: string;
+          error?: {
+            message?: string;
+            name?: string;
+          };
+        }
+      | null;
+
+    if (!response.ok) {
       throw new Error(
-        `SMTP host lookup failed for ${config.host}. Check DNS, internet access, or firewall settings.`
+        responseData?.message ||
+          responseData?.error?.message ||
+          `Resend email failed with status ${response.status}`
       );
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error || "Unknown error");
+
+    if (message.toLowerCase().includes("timeout")) {
+      throw new Error("Resend email request timed out.");
     }
 
     throw error;

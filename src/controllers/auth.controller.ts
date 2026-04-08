@@ -48,16 +48,13 @@ const isProductionEnvironment = (): boolean =>
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  const buildSmtpDebugSummary = () => ({
-    host: process.env.SMTP_HOST?.trim() || null,
-    port: process.env.SMTP_PORT?.trim() || null,
-    secure:
-      (process.env.SMTP_SECURE ?? "").trim() !== ""
-        ? String(process.env.SMTP_SECURE).trim().toLowerCase() === "true"
-        : null,
-    user: process.env.SMTP_USER?.trim() || null,
-    from: process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || null,
-  });
+  const buildMailDebugSummary = () => {
+    return {
+      provider: "resend",
+      from: process.env.RESEND_FROM?.trim() || null,
+      reply_to: process.env.RESEND_REPLY_TO?.trim() || null,
+    };
+  };
 
 const getVerificationUrlForUser = (userId: number, email: string): string =>
   buildEmailVerificationUrl(
@@ -356,7 +353,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       return res.status(201).json({
         status: "success",
         message:
-          "Student account created, but the verification email could not be sent. Retry the resend verification flow after SMTP/DNS is available.",
+          "Student account created, but the verification email could not be sent. Retry the resend verification flow after the mail service is available.",
         warning: "Verification email delivery failed.",
         user: {
           user_id: user.user_id,
@@ -1129,7 +1126,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
         return res.status(200).json({
           status: "success",
           message:
-            "Verification email could not be sent. Use the verification URL below in development or retry once SMTP/DNS is available.",
+            "Verification email could not be sent. Use the verification URL below in development or retry once the mail service is available.",
           warning: "Verification email delivery failed.",
           verification_url: verificationUrl,
           email_error: emailErrorMessage,
@@ -1166,68 +1163,62 @@ export const testSmtpConnection = async (req: Request, res: Response) => {
     if (!email) {
       return res.status(400).json({
         status: "error",
-        message: "Email address is required for SMTP test delivery.",
+        message: "Email address is required for mail test delivery.",
       });
     }
 
     if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({
         status: "error",
-        message: "Enter a valid email address for SMTP testing.",
+        message: "Enter a valid email address for mail testing.",
       });
     }
 
-    const smtpSummary = buildSmtpDebugSummary();
+    const mailSummary = buildMailDebugSummary();
 
     await sendEmail({
       to: email,
-      subject: "eRegistrar SMTP test email",
+      subject: "eRegistrar mail test email",
       text: `Hello,
 
 This is a test email from eRegistrar.
 
 Sent at: ${new Date().toISOString()}
-SMTP host: ${smtpSummary.host || "not configured"}
-SMTP port: ${smtpSummary.port || "not configured"}
-SMTP secure: ${smtpSummary.secure === null ? "not configured" : String(smtpSummary.secure)}
-From address: ${smtpSummary.from || "not configured"}
+Provider: ${mailSummary.provider}
+From address: ${mailSummary.from || "not configured"}
 `,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #1f2937;">
-          <h2 style="margin-bottom: 16px;">eRegistrar SMTP test email</h2>
+          <h2 style="margin-bottom: 16px;">eRegistrar mail test email</h2>
           <p style="margin-bottom: 16px;">Hello,</p>
           <p style="margin-bottom: 16px;">This is a test email from eRegistrar.</p>
           <p style="margin-bottom: 8px;"><strong>Sent at:</strong> ${new Date().toISOString()}</p>
-          <p style="margin-bottom: 8px;"><strong>SMTP host:</strong> ${smtpSummary.host || "not configured"}</p>
-          <p style="margin-bottom: 8px;"><strong>SMTP port:</strong> ${smtpSummary.port || "not configured"}</p>
-          <p style="margin-bottom: 8px;"><strong>SMTP secure:</strong> ${
-            smtpSummary.secure === null ? "not configured" : String(smtpSummary.secure)
-          }</p>
-          <p style="margin-bottom: 8px;"><strong>From address:</strong> ${smtpSummary.from || "not configured"}</p>
+          <p style="margin-bottom: 8px;"><strong>Provider:</strong> ${mailSummary.provider}</p>
+          <p style="margin-bottom: 8px;"><strong>From address:</strong> ${mailSummary.from || "not configured"}</p>
         </div>
       `,
     });
 
     return res.status(200).json({
       status: "success",
-      message: `SMTP test email sent successfully to ${email}.`,
+      message: `Mail test email sent successfully to ${email}.`,
       data: {
         to: email,
-        smtp: smtpSummary,
+        mail: mailSummary,
       },
     });
   } catch (error) {
     const message = getErrorMessage(error);
-    const smtpSummary = buildSmtpDebugSummary();
+    const mailSummary = buildMailDebugSummary();
 
-    console.error("SMTP TEST EMAIL ERROR:", message);
+    console.error("MAIL TEST EMAIL ERROR:", message);
 
     return res.status(503).json({
       status: "error",
-      message: "SMTP test email failed.",
+      message: "Mail test email failed.",
       error_detail: message,
       data: {
-        smtp: smtpSummary,
+        mail: mailSummary,
       },
     });
   }

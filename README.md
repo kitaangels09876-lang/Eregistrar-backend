@@ -51,14 +51,11 @@ FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:3001
 
 # ==========================================
-# EMAIL VERIFICATION
+# EMAIL DELIVERY (RESEND)
 # ==========================================
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your-email@example.com
-SMTP_PASS=your-app-password
-SMTP_FROM=your-email@example.com
+RESEND_API_KEY=
+RESEND_FROM=
+RESEND_REPLY_TO=
 
 EMAIL_VERIFICATION_SECRET=another_long_random_secret_here
 EMAIL_VERIFICATION_EXPIRES_IN=1d

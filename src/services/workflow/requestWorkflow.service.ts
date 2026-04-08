@@ -217,10 +217,8 @@ type WorkflowEmailRecipient = {
 };
 
 const MAIL_REQUIRED_ENV_KEYS = [
-  "SMTP_HOST",
-  "SMTP_PORT",
-  "SMTP_USER",
-  "SMTP_PASS",
+  "RESEND_API_KEY",
+  "RESEND_FROM",
 ] as const;
 
 const isWorkflowEmailConfigured = () =>
