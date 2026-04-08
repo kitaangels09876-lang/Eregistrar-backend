@@ -749,6 +749,7 @@ const getStudentWorkflowEmailContent = ({
 };
 
 const AUTO_PAYMENT_TRANSITION_DELAY_SECONDS = 60;
+const AUTO_COMPLETE_CLAIM_DELAY_SECONDS = 300;
 
 const promoteCollegeAdminApprovedRequests = async (
   workflowRequestId?: number
@@ -954,6 +955,191 @@ const promoteCollegeAdminApprovedRequests = async (
         detail: updatedDetail,
       });
     }
+  }
+};
+
+const autoCompleteClaimedRequests = async (workflowRequestId?: number) => {
+  const rows: Array<{
+    workflow_request_id: number;
+    workflow_release_record_id: number | null;
+    student_user_id: number | null;
+    request_reference: string;
+    release_snapshot_json: any;
+    acted_by_user_id: number | null;
+  }> = await sequelize.query(
+    `
+    SELECT
+      wr.workflow_request_id,
+      wrr.workflow_release_record_id,
+      wr.student_user_id,
+      wr.request_reference,
+      wr.release_snapshot_json,
+      COALESCE(wrr.released_by_user_id, wr.student_user_id) AS acted_by_user_id
+    FROM workflow_requests wr
+    LEFT JOIN workflow_release_records wrr ON wrr.workflow_request_id = wr.workflow_request_id
+    WHERE wr.current_status = 'CLAIMED'
+      AND TIMESTAMPDIFF(
+        SECOND,
+        COALESCE(
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(wr.release_snapshot_json, '$.date_released')), ''),
+          DATE_FORMAT(wr.updated_at, '%Y-%m-%d %H:%i:%s')
+        ),
+        NOW()
+      ) >= :delaySeconds
+      ${workflowRequestId ? "AND wr.workflow_request_id = :workflowRequestId" : ""}
+    `,
+    {
+      replacements: {
+        delaySeconds: AUTO_COMPLETE_CLAIM_DELAY_SECONDS,
+        ...(workflowRequestId ? { workflowRequestId } : {}),
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  for (const row of rows) {
+    const actionActorUserId = Number(row.acted_by_user_id || row.student_user_id || 0);
+
+    if (!Number.isInteger(actionActorUserId) || actionActorUserId <= 0) {
+      continue;
+    }
+
+    const releaseSnapshot = parseJsonField<Record<string, any>>(
+      row.release_snapshot_json,
+      {}
+    );
+    const autoCompleteRemarks =
+      "Automatically completed 5 minutes after claim confirmation.";
+    const completedAt = new Date().toISOString();
+
+    releaseSnapshot.completed_at = releaseSnapshot.completed_at || completedAt;
+    releaseSnapshot.release_status = "COMPLETED";
+    releaseSnapshot.released_by_user_id =
+      releaseSnapshot.released_by_user_id || actionActorUserId;
+
+    await sequelize.transaction(async (transaction) => {
+      await sequelize.query(
+        `
+        UPDATE workflow_requests
+        SET
+          current_status = 'COMPLETED',
+          release_snapshot_json = :releaseSnapshot,
+          completed_at = NOW()
+        WHERE workflow_request_id = :workflowRequestId
+          AND current_status = 'CLAIMED'
+        `,
+        {
+          replacements: {
+            workflowRequestId: row.workflow_request_id,
+            releaseSnapshot: JSON.stringify(releaseSnapshot),
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+
+      await sequelize.query(
+        `
+        UPDATE workflow_release_records
+        SET
+          release_status = 'COMPLETED',
+          delivery_confirmed_at = COALESCE(delivery_confirmed_at, NOW())
+        WHERE workflow_request_id = :workflowRequestId
+        `,
+        {
+          replacements: {
+            workflowRequestId: row.workflow_request_id,
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+
+      await sequelize.query(
+        `
+        INSERT INTO workflow_request_actions (
+          workflow_request_id,
+          action_role,
+          action_type,
+          from_status,
+          to_status,
+          remarks,
+          payload_json,
+          acted_by_user_id,
+          acted_at
+        ) VALUES (
+          :workflowRequestId,
+          'system',
+          'AUTO_ADVANCE_STATUS',
+          'CLAIMED',
+          'COMPLETED',
+          :remarks,
+          :payload,
+          :actedByUserId,
+          NOW()
+        )
+        `,
+        {
+          replacements: {
+            workflowRequestId: row.workflow_request_id,
+            remarks: autoCompleteRemarks,
+            payload: JSON.stringify({
+              auto_transition: true,
+              delay_seconds: AUTO_COMPLETE_CLAIM_DELAY_SECONDS,
+            }),
+            actedByUserId: actionActorUserId,
+          },
+          transaction,
+          type: QueryTypes.INSERT,
+        }
+      );
+    });
+
+    await insertReleaseLog({
+      workflowRequestId: row.workflow_request_id,
+      workflowReleaseRecordId: row.workflow_release_record_id,
+      eventType: "COMPLETED",
+      remarks: autoCompleteRemarks,
+      metadata: {
+        auto_transition: true,
+        delay_seconds: AUTO_COMPLETE_CLAIM_DELAY_SECONDS,
+      },
+      actedByUserId: actionActorUserId,
+    });
+
+    await createWorkflowAuditLog({
+      userId: actionActorUserId,
+      action: "WORKFLOW_COMPLETED",
+      workflowRequestId: row.workflow_request_id,
+      oldValue: {
+        current_status: "CLAIMED",
+      },
+      newValue: {
+        current_status: "COMPLETED",
+        release_snapshot: releaseSnapshot,
+      },
+    });
+
+    await updateClaimStubStatus(row.workflow_request_id, "USED");
+
+    const updatedDetail = await getRequestDetailInternal(Number(row.workflow_request_id));
+
+    await createWorkflowNotification({
+      userId: row.student_user_id,
+      title: "Request completed",
+      message: `Request ${row.request_reference} has been completed.`,
+      status: "COMPLETED",
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [row.student_user_id],
+      requestReference: row.request_reference,
+      status: "COMPLETED",
+      title: "Request completed",
+      message: `Request ${row.request_reference} has been completed.`,
+      detail: updatedDetail,
+      remarks: autoCompleteRemarks,
+    });
   }
 };
 
@@ -3155,6 +3341,7 @@ export const listWorkflowRequests = async (
 ) => {
   await ensureWorkflowSchema();
   await promoteCollegeAdminApprovedRequests();
+  await autoCompleteClaimedRequests();
 
   const roles = getRoleNames(user);
   const whereClauses: string[] = [];
@@ -3445,6 +3632,7 @@ export const getWorkflowRequestDetail = async (
 ) => {
   await ensureWorkflowSchema();
   await promoteCollegeAdminApprovedRequests(workflowRequestId);
+  await autoCompleteClaimedRequests(workflowRequestId);
 
   const detail = await getRequestDetailInternal(workflowRequestId);
   const roles = getRoleNames(user);
@@ -3716,6 +3904,7 @@ export const advanceWorkflowRequest = async (
     const isRepresentativeClaim = claimantType === "representative";
 
     releaseSnapshot.release_method = "pickup";
+    releaseSnapshot.released_by_user_id = user.user_id;
     releaseSnapshot.date_released = new Date().toISOString();
     releaseSnapshot.claimant_name =
       updates.claimant_name || releaseSnapshot.claimant_name || null;
@@ -4145,6 +4334,7 @@ export const getWorkflowRequestLatestDocument = async (
   user?: AuthUser
 ) => {
   await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests(workflowRequestId);
 
   let detail: any = null;
   if (user) {
@@ -4236,6 +4426,7 @@ export const getWorkflowRequestClaimStub = async (
   workflowRequestId: number,
   user: AuthUser
 ) => {
+  await autoCompleteClaimedRequests(workflowRequestId);
   const detail = await getWorkflowRequestDetail(workflowRequestId, user);
   const claimStub = detail.latest_claim_stub;
 
@@ -4306,6 +4497,7 @@ export const lookupWorkflowClaimStub = async (
   }
 ) => {
   await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests();
 
   const roles = getRoleNames(user);
   if (
@@ -4461,6 +4653,7 @@ export const getWorkflowRequestTimeline = async (
   workflowRequestId: number,
   user: AuthUser
 ) => {
+  await autoCompleteClaimedRequests(workflowRequestId);
   const detail = await getWorkflowRequestDetail(workflowRequestId, user);
   return detail.actions;
 };
@@ -4499,6 +4692,7 @@ export const processWorkflowAction = async (
     updates?: Record<string, any>;
   }
 ) => {
+  await autoCompleteClaimedRequests(workflowRequestId);
   const detail = await getWorkflowRequestDetail(workflowRequestId, user);
   const roles = getRoleNames(user);
   const currentStatus = detail.current_status as WorkflowStatus;
