@@ -869,16 +869,6 @@ export const generateRequestFormPdf = async (
       baseFontSize: 8.5,
     });
     y += writeField({
-      namePrefix: "address_line",
-      label: "ADDRESS:",
-      value: upper(form.address_line),
-      x: LEFT + 18,
-      y,
-      width: 490,
-      maxLines: 2,
-      baseFontSize: 8.5,
-    });
-    y += writeField({
       namePrefix: "purok",
       label: "PUROK:",
       value: upper(form.purok),
