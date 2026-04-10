@@ -392,7 +392,7 @@ export const generateClaimStubPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  await uploadLocalFileToCloudinary({
+  const uploaded = await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
     mimeType: "application/pdf",
@@ -405,5 +405,6 @@ export const generateClaimStubPdf = async (
     fileName,
     absolutePath,
     relativePath,
+    storagePath: uploaded.url || relativePath,
   };
 };

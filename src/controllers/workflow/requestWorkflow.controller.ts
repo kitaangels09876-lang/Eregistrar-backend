@@ -54,6 +54,77 @@ const resolveWorkflowErrorStatus = (error: unknown) => {
 const buildInlineFileName = (fileName?: string | null, fallback = "document.pdf") =>
   (fileName || fallback).replace(/[\r\n"]/g, "").trim() || fallback;
 
+const workspaceRoot = path.resolve(process.cwd());
+
+const isPathInsideWorkspace = (candidatePath: string) => {
+  const resolvedCandidate = path.resolve(candidatePath).toLowerCase();
+  const normalizedRoot = workspaceRoot.toLowerCase();
+
+  return (
+    resolvedCandidate === normalizedRoot ||
+    resolvedCandidate.startsWith(`${normalizedRoot}${path.sep}`)
+  );
+};
+
+const addLocalCandidatePath = (
+  candidates: string[],
+  candidatePath?: string | null
+) => {
+  if (!candidatePath) {
+    return;
+  }
+
+  const resolved = path.resolve(candidatePath);
+
+  if (!isPathInsideWorkspace(resolved)) {
+    return;
+  }
+
+  if (!candidates.includes(resolved)) {
+    candidates.push(resolved);
+  }
+};
+
+const resolveLocalAssetPath = (assetPath: string, fileName?: string | null) => {
+  const candidates: string[] = [];
+  const normalizedAssetPath = String(assetPath || "").trim().replace(/^file:\/\//i, "");
+
+  if (normalizedAssetPath && !/^https?:\/\//i.test(normalizedAssetPath)) {
+    const normalizedSeparators = normalizedAssetPath
+      .replace(/^\/+/, "")
+      .replace(/[\\/]+/g, path.sep);
+
+    if (path.isAbsolute(normalizedAssetPath)) {
+      addLocalCandidatePath(candidates, normalizedAssetPath);
+    }
+
+    addLocalCandidatePath(candidates, path.join(process.cwd(), normalizedSeparators));
+    addLocalCandidatePath(candidates, path.join(process.cwd(), "dist", normalizedSeparators));
+
+    const uploadsMarker = `uploads${path.sep}`;
+    const uploadsIndex = normalizedSeparators.toLowerCase().indexOf(uploadsMarker);
+    if (uploadsIndex >= 0) {
+      const fromUploads = normalizedSeparators.slice(uploadsIndex);
+      addLocalCandidatePath(candidates, path.join(process.cwd(), fromUploads));
+    }
+  }
+
+  const safeFileName = fileName ? path.basename(String(fileName)) : "";
+  if (safeFileName) {
+    addLocalCandidatePath(
+      candidates,
+      path.join(process.cwd(), "uploads", "workflow", "claim-stubs", safeFileName)
+    );
+    addLocalCandidatePath(
+      candidates,
+      path.join(process.cwd(), "uploads", "workflow", "forms", safeFileName)
+    );
+    addLocalCandidatePath(candidates, path.join(process.cwd(), "uploads", safeFileName));
+  }
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+};
+
 const sendInlineAsset = async (
   res: Response,
   assetPath: string,
@@ -86,10 +157,8 @@ const sendInlineAsset = async (
     return res.status(200).send(payload);
   }
 
-  const normalizedPath = assetPath.replace(/^\/+/, "").replace(/\//g, path.sep);
-  const absolutePath = path.join(process.cwd(), normalizedPath);
-
-  if (!fs.existsSync(absolutePath)) {
+  const absolutePath = resolveLocalAssetPath(assetPath, fileName);
+  if (!absolutePath) {
     throw new Error("Stored file not found");
   }
 

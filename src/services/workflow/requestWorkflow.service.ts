@@ -2734,7 +2734,7 @@ const regenerateDocument = async (workflowRequestId: number, actedByUserId: numb
         versionNumber: Number(versionRow?.nextVersion || 1),
         sourceStatus: detail.current_status,
         fileName: generated.fileName,
-        filePath: generated.relativePath,
+        filePath: generated.storagePath || generated.relativePath,
         generatedByUserId: actedByUserId,
       },
       type: QueryTypes.INSERT,
@@ -2824,7 +2824,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
         claimStubNumber,
         lookupTokenHash,
         fileName: generated.fileName,
-        filePath: generated.relativePath,
+        filePath: generated.storagePath || generated.relativePath,
       },
       type: QueryTypes.INSERT,
     }
@@ -2836,7 +2836,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
     workflowRequestId,
     newValue: {
       claim_stub_number: claimStubNumber,
-      file_path: generated.relativePath,
+      file_path: generated.storagePath || generated.relativePath,
       verification_url: verificationUrl,
     },
   });

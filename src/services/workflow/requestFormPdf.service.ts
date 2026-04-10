@@ -1248,7 +1248,7 @@ export const generateRequestFormPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  await uploadLocalFileToCloudinary({
+  const uploaded = await uploadLocalFileToCloudinary({
     filePath: absolutePath,
     fileName,
     mimeType: "application/pdf",
@@ -1261,5 +1261,6 @@ export const generateRequestFormPdf = async (
     fileName,
     absolutePath,
     relativePath,
+    storagePath: uploaded.url || relativePath,
   };
 };
