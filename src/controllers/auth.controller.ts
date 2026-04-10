@@ -17,7 +17,7 @@ import { getPermissionsForRoles } from "../services/auth/permission.service";
     sendEmailVerificationEmail,
     verifyEmailVerificationToken,
   } from "../services/emailVerification.service";
-  import { sendEmail } from "../services/mail.service";
+  import { getMailDebugSummary, sendEmail } from "../services/mail.service";
 import {
   sendSingleFieldValidationError,
   sendValidationError,
@@ -34,6 +34,7 @@ import {
   replaceDeanAssignments,
   replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
+import { ensureUserSoftDeleteSchema } from "../services/auth/userSoftDelete.service";
 
 const isProductionEnvironment = (): boolean =>
   process.env.NODE_ENV === "production";
@@ -47,17 +48,6 @@ const isProductionEnvironment = (): boolean =>
   };
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  const buildMailDebugSummary = () => {
-    return {
-      provider: "smtp",
-      host: process.env.SMTP_HOST?.trim() || null,
-      port: process.env.SMTP_PORT?.trim() || null,
-      secure: process.env.SMTP_SECURE?.trim() || null,
-      from: process.env.SMTP_FROM?.trim() || null,
-      reply_to: process.env.SMTP_REPLY_TO?.trim() || null,
-    };
-  };
 
 const getVerificationUrlForUser = (userId: number, email: string): string =>
   buildEmailVerificationUrl(
@@ -480,6 +470,8 @@ export const registerStudent = async (req: Request, res: Response) => {
 
   export const login = async (req: Request, res: Response) => {
     try {
+      await ensureUserSoftDeleteSchema();
+
       const { email, password } = req.body;
       
       if (!email || !password) {
@@ -489,7 +481,7 @@ export const registerStudent = async (req: Request, res: Response) => {
         });
       }
 
-      const user = await User.findOne({ where: { email } });
+      const user = await User.findOne({ where: { email, deleted_at: null } });
 
       if (!user) {
         return res.status(401).json({
@@ -642,6 +634,8 @@ export const registerStudent = async (req: Request, res: Response) => {
 
 export const checkAuth = async (req: Request, res: Response) => {
   try {
+    await ensureUserSoftDeleteSchema();
+
     const authUser = (req as any).user;
 
     if (!authUser?.user_id) {
@@ -665,6 +659,7 @@ export const checkAuth = async (req: Request, res: Response) => {
         created_at
       FROM users
       WHERE user_id = :userId
+        AND deleted_at IS NULL
       `,
       {
         replacements: { userId },
@@ -824,6 +819,8 @@ export const checkAuth = async (req: Request, res: Response) => {
 
 export const refreshAccessToken = async (req: Request, res: Response) => {
   try {
+    await ensureUserSoftDeleteSchema();
+
     const refreshToken =
       typeof req.body?.refresh_token === "string"
         ? req.body.refresh_token.trim()
@@ -850,6 +847,7 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
       SELECT user_id, email, account_type, status, created_at
       FROM users
       WHERE user_id = :userId
+        AND deleted_at IS NULL
       LIMIT 1
       `,
       {
@@ -958,6 +956,8 @@ const renderVerificationPage = ({
 
 export const verifyEmail = async (req: Request, res: Response) => {
   try {
+    await ensureUserSoftDeleteSchema();
+
     const token =
       typeof req.query.token === "string" ? req.query.token.trim() : "";
 
@@ -993,6 +993,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
       where: {
         user_id: payload.user_id,
         email: payload.email,
+        deleted_at: null,
       },
     });
 
@@ -1066,6 +1067,8 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
 export const resendVerificationEmail = async (req: Request, res: Response) => {
   try {
+    await ensureUserSoftDeleteSchema();
+
     const email =
       typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
 
@@ -1087,6 +1090,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
       where: {
         email,
         account_type: "student",
+        deleted_at: null,
       },
     });
 
@@ -1177,7 +1181,7 @@ export const testSmtpConnection = async (req: Request, res: Response) => {
       });
     }
 
-    const mailSummary = buildMailDebugSummary();
+    const mailSummary = getMailDebugSummary();
 
     await sendEmail({
       to: email,
@@ -1212,7 +1216,7 @@ From address: ${mailSummary.from || "not configured"}
     });
   } catch (error) {
     const message = getErrorMessage(error);
-    const mailSummary = buildMailDebugSummary();
+    const mailSummary = getMailDebugSummary();
 
     console.error("MAIL TEST EMAIL ERROR:", message);
 

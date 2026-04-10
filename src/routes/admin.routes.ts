@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllAdminAndRegistrarAccounts,getAdminOrRegistrarById , changeAdminOrRegistrarRole,changeAdminOrRegistrarStatus, updateAdminAccount} from "../controllers/admin.controller";
+import { getAllAdminAndRegistrarAccounts,getAdminOrRegistrarById , changeAdminOrRegistrarRole,changeAdminOrRegistrarStatus, softDeleteAdminOrRegistrarAccount, updateAdminAccount} from "../controllers/admin.controller";
 import { authenticateToken, requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -37,6 +37,13 @@ router.put(
   authenticateToken,
   requireRole("admin"),
   changeAdminOrRegistrarStatus
+);
+
+router.delete(
+  "/admins/:userId",
+  authenticateToken,
+  requireRole("admin"),
+  softDeleteAdminOrRegistrarAccount
 );
 
 router.put(

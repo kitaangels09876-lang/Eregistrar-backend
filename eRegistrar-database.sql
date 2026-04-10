@@ -11,6 +11,7 @@
         password VARCHAR(255) NOT NULL,
         account_type ENUM('student','alumni','admin','registrar','dean','college_admin','treasurer') NOT NULL,
         status ENUM('active','inactive') DEFAULT 'active',
+        deleted_at DATETIME NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NULL
     ) ENGINE=InnoDB;
