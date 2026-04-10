@@ -47,18 +47,18 @@ const QUEUE_ACCESS_RULES: Array<{
 }> = [
   {
     statuses: ["UNDER_DEAN_APPROVAL"],
-    roles: ["dean", "admin"],
-    permissions: ["approval.dean.view", "request.view.all"],
+    roles: ["dean"],
+    permissions: ["approval.dean.view"],
   },
   {
     statuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
-    roles: ["college_admin", "admin"],
-    permissions: ["approval.college_admin.view", "request.view.all"],
+    roles: ["college_admin"],
+    permissions: ["approval.college_admin.view"],
   },
   {
     statuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
-    roles: ["treasurer", "admin"],
-    permissions: ["payment.confirm", "request.view.all"],
+    roles: ["treasurer"],
+    permissions: ["payment.confirm"],
   },
 ];
 
@@ -95,22 +95,22 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
 };
 
 const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
-  UNDER_REGISTRAR_VERIFICATION: ["registrar", "admin"],
-  UNDER_DEAN_APPROVAL: ["registrar", "admin"],
-  DEAN_APPROVED: ["dean", "admin"],
-  UNDER_COLLEGE_ADMIN_REVIEW: ["dean", "admin"],
-  COLLEGE_ADMIN_APPROVED: ["college_admin", "admin"],
-  FEE_ASSESSED: ["registrar", "admin"],
-  AWAITING_PAYMENT: ["registrar", "college_admin", "admin"],
-  PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
-  PAYMENT_CONFIRMED: ["treasurer", "admin"],
-  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar", "admin"],
-  DOCUMENT_GENERATION: ["registrar", "admin"],
-  READY_FOR_RELEASE: ["registrar", "admin"],
-  CLAIMED: ["registrar", "admin"],
-  COMPLETED: ["registrar", "admin"],
-  CANCELLED: ["student", "alumni", "registrar", "admin"],
-  REJECTED: ["registrar", "dean", "college_admin", "admin"],
+  UNDER_REGISTRAR_VERIFICATION: ["registrar"],
+  UNDER_DEAN_APPROVAL: ["registrar"],
+  DEAN_APPROVED: ["dean"],
+  UNDER_COLLEGE_ADMIN_REVIEW: ["dean"],
+  COLLEGE_ADMIN_APPROVED: ["college_admin"],
+  FEE_ASSESSED: ["registrar"],
+  AWAITING_PAYMENT: ["registrar", "college_admin"],
+  PAYMENT_SUBMITTED: ["student", "alumni"],
+  PAYMENT_CONFIRMED: ["treasurer"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar"],
+  DOCUMENT_GENERATION: ["registrar"],
+  READY_FOR_RELEASE: ["registrar"],
+  CLAIMED: ["registrar"],
+  COMPLETED: ["registrar"],
+  CANCELLED: ["student", "alumni", "registrar"],
+  REJECTED: ["registrar", "dean", "college_admin"],
 };
 
 const normalizeRoles = (roles: string[] = []) =>
@@ -1544,57 +1544,57 @@ const WORKFLOW_ACTION_RULES: Record<
   { roles: string[]; permissions: string[]; currentStatuses: WorkflowStatus[] }
 > = {
   registrar_verification: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["request.verify"],
     currentStatuses: ["SUBMITTED", "UNDER_REGISTRAR_VERIFICATION"],
   },
   dean_approve: {
-    roles: ["dean", "admin"],
+    roles: ["dean"],
     permissions: ["approval.dean.approve"],
     currentStatuses: ["UNDER_DEAN_APPROVAL"],
   },
   college_admin_approve: {
-    roles: ["college_admin", "admin"],
+    roles: ["college_admin"],
     permissions: ["approval.college_admin.approve"],
     currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
   },
   fee_assess: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["payment.assess"],
     currentStatuses: ["COLLEGE_ADMIN_APPROVED"],
   },
   payment_submit: {
-    roles: ["student", "alumni", "admin"],
+    roles: ["student", "alumni"],
     permissions: ["payment.submit.own"],
     currentStatuses: ["AWAITING_PAYMENT"],
   },
   payment_confirm: {
-    roles: ["treasurer", "admin"],
+    roles: ["treasurer"],
     permissions: ["payment.confirm"],
     currentStatuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
   },
   document_prepare: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.prepare"],
     currentStatuses: ["UNDER_REGISTRAR_PROCESSING"],
   },
   document_finalize: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.generate"],
     currentStatuses: ["DOCUMENT_GENERATION"],
   },
   release_claim: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.claim"],
     currentStatuses: ["READY_FOR_RELEASE"],
   },
   release_complete: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.release", "document.claim"],
     currentStatuses: ["CLAIMED"],
   },
   request_cancel: {
-    roles: ["student", "alumni", "registrar", "admin"],
+    roles: ["student", "alumni", "registrar"],
     permissions: ["request.cancel.own", "request.cancel.any"],
     currentStatuses: [
       "SUBMITTED",
@@ -1609,17 +1609,17 @@ const WORKFLOW_ACTION_RULES: Record<
     ],
   },
   registrar_reject: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["request.verify"],
     currentStatuses: ["UNDER_REGISTRAR_VERIFICATION", "UNDER_REGISTRAR_PROCESSING", "DOCUMENT_GENERATION"],
   },
   dean_reject: {
-    roles: ["dean", "admin"],
+    roles: ["dean"],
     permissions: ["approval.dean.approve"],
     currentStatuses: ["UNDER_DEAN_APPROVAL"],
   },
   college_admin_reject: {
-    roles: ["college_admin", "admin"],
+    roles: ["college_admin"],
     permissions: ["approval.college_admin.approve"],
     currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
   },
@@ -4521,10 +4521,10 @@ export const lookupWorkflowClaimStub = async (
 
   const roles = getRoleNames(user);
   if (
-    (!roles.includes("registrar") && !roles.includes("admin")) ||
+    !roles.includes("registrar") ||
     !hasAnyPermission(user, ["claim_stub.verify"])
   ) {
-    throw new Error("Only registrar or admin with claim stub verification permission can verify claim stubs");
+    throw new Error("Only registrar with claim stub verification permission can verify claim stubs");
   }
 
   const lookupToken = input.lookup_token ? parseClaimLookupToken(input.lookup_token) : "";
