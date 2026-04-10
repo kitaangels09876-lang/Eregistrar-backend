@@ -144,6 +144,11 @@ const sendInlineAsset = async (
     });
 
     if (!assetResponse.ok) {
+      const localFallbackPath = resolveLocalAssetPath("", fileName);
+      if (localFallbackPath) {
+        return res.sendFile(localFallbackPath);
+      }
+
       if (
         assetResponse.status === 401 &&
         /cloudinary\.com/i.test(normalizedAssetPath)
@@ -558,7 +563,12 @@ export const downloadWorkflowRequestLatestDocumentHandler = async (
     try {
       return await sendInlineAsset(res, data.file_path, data.file_name);
     } catch (inlineError: any) {
-      if (!String(inlineError?.message || "").toLowerCase().includes("stored file not found")) {
+      const inlineMessage = String(inlineError?.message || "").toLowerCase();
+      if (
+        !inlineMessage.includes("stored file not found") &&
+        !inlineMessage.includes("pdf delivery is blocked by cloudinary") &&
+        !inlineMessage.includes("unable to load file from storage")
+      ) {
         throw inlineError;
       }
 
@@ -609,7 +619,12 @@ export const downloadWorkflowRequestClaimStubHandler = async (
     try {
       return await sendInlineAsset(res, data.file_path, resolveClaimStubFileName(data));
     } catch (inlineError: any) {
-      if (!String(inlineError?.message || "").toLowerCase().includes("stored file not found")) {
+      const inlineMessage = String(inlineError?.message || "").toLowerCase();
+      if (
+        !inlineMessage.includes("stored file not found") &&
+        !inlineMessage.includes("pdf delivery is blocked by cloudinary") &&
+        !inlineMessage.includes("unable to load file from storage")
+      ) {
         throw inlineError;
       }
 

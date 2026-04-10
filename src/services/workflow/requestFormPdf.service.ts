@@ -1248,19 +1248,25 @@ export const generateRequestFormPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  const uploaded = await uploadLocalFileToCloudinary({
-    filePath: absolutePath,
-    fileName,
-    mimeType: "application/pdf",
-    folder: "eregistrar/workflow/forms",
-    publicId: `${request.request_reference}_v${versionNumber}`,
-    resourceType: "image",
-  });
+  // Keep local file path as the primary source so PDF delivery does not depend on
+  // Cloudinary's PDF access policy. Upload is best-effort for backup only.
+  try {
+    await uploadLocalFileToCloudinary({
+      filePath: absolutePath,
+      fileName,
+      mimeType: "application/pdf",
+      folder: "eregistrar/workflow/forms",
+      publicId: `${request.request_reference}_v${versionNumber}`,
+      resourceType: "image",
+    });
+  } catch (error) {
+    console.warn("Request form Cloudinary upload failed; serving local PDF path instead.", error);
+  }
 
   return {
     fileName,
     absolutePath,
     relativePath,
-    storagePath: uploaded.url || relativePath,
+    storagePath: relativePath,
   };
 };
