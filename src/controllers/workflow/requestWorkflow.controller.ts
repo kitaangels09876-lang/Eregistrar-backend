@@ -15,6 +15,8 @@ import {
   listWorkflowRequests,
   lookupWorkflowClaimStub,
   processWorkflowAction,
+  regenerateWorkflowRequestClaimStubDownload,
+  regenerateWorkflowRequestLatestDocumentDownload,
 } from "../../services/workflow/requestWorkflow.service";
 import { WorkflowStatus } from "../../constants/workflow";
 import { WorkflowRequestPayload } from "../../types/workflow";
@@ -131,17 +133,20 @@ const sendInlineAsset = async (
   fileName?: string | null
 ) => {
   const safeFileName = buildInlineFileName(fileName);
+  const normalizedAssetPath = String(assetPath || "").trim();
 
   res.setHeader("Content-Disposition", `inline; filename="${safeFileName}"`);
   res.setHeader("Content-Type", "application/pdf");
 
-  if (/^https?:\/\//i.test(assetPath)) {
-    const assetResponse = await fetch(assetPath, { signal: AbortSignal.timeout(30000) });
+  if (/^https?:\/\//i.test(normalizedAssetPath)) {
+    const assetResponse = await fetch(normalizedAssetPath, {
+      signal: AbortSignal.timeout(30000),
+    });
 
     if (!assetResponse.ok) {
       if (
         assetResponse.status === 401 &&
-        /cloudinary\.com/i.test(assetPath)
+        /cloudinary\.com/i.test(normalizedAssetPath)
       ) {
         throw new Error(
           "PDF delivery is blocked by Cloudinary. Enable 'Allow delivery of PDF and ZIP files' in your Cloudinary security settings or use a paid plan."
@@ -157,7 +162,7 @@ const sendInlineAsset = async (
     return res.status(200).send(payload);
   }
 
-  const absolutePath = resolveLocalAssetPath(assetPath, fileName);
+  const absolutePath = resolveLocalAssetPath(normalizedAssetPath, fileName);
   if (!absolutePath) {
     throw new Error("Stored file not found");
   }
@@ -546,12 +551,20 @@ export const downloadWorkflowRequestLatestDocumentHandler = async (
   res: Response
 ) => {
   try {
-    const data = await getWorkflowRequestLatestDocumentDownload(
-      Number(req.params.workflowRequestId || req.params.requestId),
-      getAuthUser(req)
-    );
+    const workflowRequestId = Number(req.params.workflowRequestId || req.params.requestId);
+    const authUser = getAuthUser(req);
+    let data = await getWorkflowRequestLatestDocumentDownload(workflowRequestId, authUser);
 
-    return await sendInlineAsset(res, data.file_path, data.file_name);
+    try {
+      return await sendInlineAsset(res, data.file_path, data.file_name);
+    } catch (inlineError: any) {
+      if (!String(inlineError?.message || "").toLowerCase().includes("stored file not found")) {
+        throw inlineError;
+      }
+
+      data = await regenerateWorkflowRequestLatestDocumentDownload(workflowRequestId, authUser);
+      return await sendInlineAsset(res, data.file_path, data.file_name);
+    }
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
@@ -587,12 +600,22 @@ export const downloadWorkflowRequestClaimStubHandler = async (
   res: Response
 ) => {
   try {
-    const data = await getWorkflowRequestClaimStubDownload(
-      Number(req.params.workflowRequestId || req.params.requestId),
-      getAuthUser(req)
-    );
+    const workflowRequestId = Number(req.params.workflowRequestId || req.params.requestId);
+    const authUser = getAuthUser(req);
+    let data = await getWorkflowRequestClaimStubDownload(workflowRequestId, authUser);
+    const resolveClaimStubFileName = (claimStubData: any) =>
+      claimStubData.file_name || `${claimStubData.claim_stub_number}.pdf`;
 
-    return await sendInlineAsset(res, data.file_path, data.file_name || data.claim_stub_number);
+    try {
+      return await sendInlineAsset(res, data.file_path, resolveClaimStubFileName(data));
+    } catch (inlineError: any) {
+      if (!String(inlineError?.message || "").toLowerCase().includes("stored file not found")) {
+        throw inlineError;
+      }
+
+      data = await regenerateWorkflowRequestClaimStubDownload(workflowRequestId, authUser);
+      return await sendInlineAsset(res, data.file_path, resolveClaimStubFileName(data));
+    }
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",

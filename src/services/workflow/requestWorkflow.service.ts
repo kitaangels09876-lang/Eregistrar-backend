@@ -4442,6 +4442,46 @@ export const getWorkflowRequestLatestDocumentDownload = async (
   return document;
 };
 
+export const regenerateWorkflowRequestLatestDocumentDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests(workflowRequestId);
+
+  const detail = await getWorkflowRequestDetail(workflowRequestId, user);
+
+  if (
+    getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+    (!hasAnyPermission(user, ["document.view.own.allowed"]) ||
+      !detail.document_access?.can_download_generated_document)
+  ) {
+    throw new Error("Generated document download is not allowed for this request yet");
+  }
+
+  await regenerateDocument(workflowRequestId, user.user_id);
+
+  const [document]: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_generated_documents
+    WHERE workflow_request_id = :workflowRequestId
+    ORDER BY version_number DESC
+    LIMIT 1
+    `,
+    {
+      replacements: { workflowRequestId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (!document) {
+    throw new Error("No generated request form is available");
+  }
+
+  return document;
+};
+
 export const getWorkflowRequestClaimStub = async (
   workflowRequestId: number,
   user: AuthUser
@@ -4492,6 +4532,82 @@ export const getWorkflowRequestClaimStubDownload = async (
   });
 
   return claimStub;
+};
+
+export const regenerateWorkflowRequestClaimStubDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests(workflowRequestId);
+
+  const detail = await getWorkflowRequestDetail(workflowRequestId, user);
+  const latestClaimStub = detail.latest_claim_stub;
+
+  if (!latestClaimStub) {
+    throw new Error("No claim stub is available for this request");
+  }
+
+  if (
+    getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+    (!hasAnyPermission(user, ["claim_stub.view.own", "claim_stub.download.own"]) ||
+      !detail.document_access?.can_download_claim_stub)
+  ) {
+    throw new Error("Claim stub access is not allowed for this request");
+  }
+
+  const verificationUrl = `${
+    process.env.FRONTEND_URL || "http://localhost:3000"
+  }/admin/workflow/claim-verification`;
+
+  const generated = await generateClaimStubPdf({
+    request_reference: detail.request_reference,
+    claim_stub_number: latestClaimStub.claim_stub_number,
+    current_status: detail.current_status,
+    submitted_at: detail.submitted_at,
+    academic_snapshot: detail.academic_snapshot,
+    release_snapshot: detail.release_snapshot,
+    items: detail.items,
+    purpose: detail.purpose,
+    lookup_token: latestClaimStub.claim_stub_number,
+    verification_url: verificationUrl,
+  });
+
+  await sequelize.query(
+    `
+    UPDATE workflow_claim_stubs
+    SET
+      file_name = :fileName,
+      file_path = :filePath,
+      generated_at = NOW()
+    WHERE workflow_claim_stub_id = :workflowClaimStubId
+    `,
+    {
+      replacements: {
+        workflowClaimStubId: Number(latestClaimStub.workflow_claim_stub_id),
+        fileName: generated.fileName,
+        filePath: generated.storagePath || generated.relativePath,
+      },
+      type: QueryTypes.UPDATE,
+    }
+  );
+
+  const [updatedClaimStub]: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_claim_stubs
+    WHERE workflow_claim_stub_id = :workflowClaimStubId
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        workflowClaimStubId: Number(latestClaimStub.workflow_claim_stub_id),
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return updatedClaimStub || latestClaimStub;
 };
 
 const parseClaimLookupToken = (lookupValue: string) => {
