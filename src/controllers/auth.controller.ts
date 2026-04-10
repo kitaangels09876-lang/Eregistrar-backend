@@ -50,9 +50,12 @@ const isProductionEnvironment = (): boolean =>
 
   const buildMailDebugSummary = () => {
     return {
-      provider: "resend",
-      from: process.env.RESEND_FROM?.trim() || null,
-      reply_to: process.env.RESEND_REPLY_TO?.trim() || null,
+      provider: "smtp",
+      host: process.env.SMTP_HOST?.trim() || null,
+      port: process.env.SMTP_PORT?.trim() || null,
+      secure: process.env.SMTP_SECURE?.trim() || null,
+      from: process.env.SMTP_FROM?.trim() || null,
+      reply_to: process.env.SMTP_REPLY_TO?.trim() || null,
     };
   };
 
@@ -353,7 +356,7 @@ export const registerStudent = async (req: Request, res: Response) => {
       return res.status(201).json({
         status: "success",
         message:
-          "Student account created, but the verification email could not be sent. Retry the resend verification flow after the mail service is available.",
+          "Student account created, but the verification email could not be sent. Retry the verification email flow after the mail service is available.",
         warning: "Verification email delivery failed.",
         user: {
           user_id: user.user_id,
@@ -1118,7 +1121,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
       const emailErrorMessage = getErrorMessage(mailError);
 
       console.error(
-        "RESEND VERIFICATION EMAIL DELIVERY ERROR:",
+        "VERIFICATION EMAIL DELIVERY ERROR:",
         emailErrorMessage
       );
 
@@ -1144,7 +1147,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
       message: "Verification email sent successfully",
     });
   } catch (error) {
-    console.error("RESEND VERIFICATION EMAIL ERROR:", error);
+    console.error("VERIFICATION EMAIL ERROR:", error);
     return res.status(500).json({
       status: "error",
       message: "Failed to send verification email",

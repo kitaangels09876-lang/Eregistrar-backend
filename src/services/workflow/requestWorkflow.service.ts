@@ -11,7 +11,7 @@ import { WorkflowRequestPayload } from "../../types/workflow";
 import { generateClaimStubPdf } from "./claimStubPdf.service";
 import { generateRequestFormPdf } from "./requestFormPdf.service";
 import { createNotification } from "../notification.service";
-import { sendEmail } from "../mail.service";
+import { isMailConfigured, sendEmail } from "../mail.service";
 import { logActivity } from "../../utils/auditlog.service";
 
 let schemaReady = false;
@@ -216,13 +216,7 @@ type WorkflowEmailRecipient = {
   roles: string[];
 };
 
-const MAIL_REQUIRED_ENV_KEYS = [
-  "RESEND_API_KEY",
-  "RESEND_FROM",
-] as const;
-
-const isWorkflowEmailConfigured = () =>
-  MAIL_REQUIRED_ENV_KEYS.every((key) => Boolean(process.env[key]?.trim()));
+const isWorkflowEmailConfigured = () => isMailConfigured();
 
 const escapeHtml = (value: string) =>
   value
@@ -929,6 +923,13 @@ const promoteCollegeAdminApprovedRequests = async (
       const registrarScope = await resolveAcademicScope(
         getWorkflowRequestAcademicScope(updatedDetail).course_id
       );
+
+      await createWorkflowNotification({
+        userId: registrarScope.registrar_user_id,
+        title: "Registrar processing required",
+        message: `Request ${row.request_reference} skipped payment and has moved to registrar processing.`,
+        status: "UNDER_REGISTRAR_PROCESSING",
+      });
 
       await dispatchWorkflowStatusEmails({
         userIds: [registrarScope.registrar_user_id],
@@ -4226,6 +4227,16 @@ export const advanceWorkflowRequest = async (
       status: body.target_status,
     });
 
+    const treasurerRecipients = await listWorkflowEmailRecipientsByRoles(["treasurer"]);
+    for (const recipient of treasurerRecipients) {
+      await createWorkflowNotification({
+        userId: recipient.user_id,
+        title: "Payment confirmation required",
+        message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting your confirmation.`,
+        status: body.target_status,
+      });
+    }
+
     await dispatchWorkflowStatusEmails({
       roles: ["treasurer"],
       requestReference: detail.request_reference,
@@ -4248,6 +4259,15 @@ export const advanceWorkflowRequest = async (
       title: isPaymentSkipped ? "No payment required" : "Payment confirmed",
       message: isPaymentSkipped
         ? `Request ${detail.request_reference} qualified for first-time free processing and moved to registrar processing.`
+        : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      status: body.target_status,
+    });
+
+    await createWorkflowNotification({
+      userId: registrarScope.registrar_user_id,
+      title: "Registrar processing required",
+      message: isPaymentSkipped
+        ? `Request ${detail.request_reference} skipped payment and is now ready for registrar processing.`
         : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
       status: body.target_status,
     });

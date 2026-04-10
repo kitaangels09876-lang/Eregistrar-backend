@@ -657,7 +657,8 @@ CREATE TABLE notifications (
         'document.generate',
         'document.release',
         'document.claim',
-        'claim_stub.verify'
+        'claim_stub.verify',
+        'notification.view.own'
     )
     WHERE r.role_name = 'registrar';
 
@@ -666,7 +667,8 @@ CREATE TABLE notifications (
     FROM roles r
     JOIN permissions p ON p.permission_key IN (
         'approval.dean.view',
-        'approval.dean.approve'
+        'approval.dean.approve',
+        'notification.view.own'
     )
     WHERE r.role_name = 'dean';
 
@@ -675,7 +677,8 @@ CREATE TABLE notifications (
     FROM roles r
     JOIN permissions p ON p.permission_key IN (
         'approval.college_admin.view',
-        'approval.college_admin.approve'
+        'approval.college_admin.approve',
+        'notification.view.own'
     )
     WHERE r.role_name = 'college_admin';
 
@@ -684,7 +687,8 @@ CREATE TABLE notifications (
     FROM roles r
     JOIN permissions p ON p.permission_key IN (
         'payment.confirm',
-        'reports.view'
+        'reports.view',
+        'notification.view.own'
     )
     WHERE r.role_name = 'treasurer';
 
@@ -713,7 +717,8 @@ CREATE TABLE notifications (
         'admin.manage.templates',
         'admin.manage.academic_structure',
         'audit.view',
-        'reports.view'
+        'reports.view',
+        'notification.view.own'
     )
     WHERE r.role_name = 'admin';
 

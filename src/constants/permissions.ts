@@ -29,13 +29,19 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "document.release",
     "document.claim",
     "claim_stub.verify",
+    "notification.view.own",
   ],
-  dean: ["approval.dean.view", "approval.dean.approve"],
+  dean: [
+    "approval.dean.view",
+    "approval.dean.approve",
+    "notification.view.own",
+  ],
   college_admin: [
     "approval.college_admin.view",
     "approval.college_admin.approve",
+    "notification.view.own",
   ],
-  treasurer: ["payment.confirm", "reports.view"],
+  treasurer: ["payment.confirm", "reports.view", "notification.view.own"],
   admin: [
     "request.view.all",
     "request.verify",
@@ -59,6 +65,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "admin.manage.academic_structure",
     "audit.view",
     "reports.view",
+    "notification.view.own",
   ],
 };
 
