@@ -198,11 +198,8 @@ export const listAssignableDeanCourses = async (currentUserId?: number) => {
       SELECT 1
       FROM workflow_dean_assignments wda
       INNER JOIN users u ON u.user_id = wda.user_id
-      INNER JOIN user_roles ur ON ur.user_id = u.user_id
-      INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE wda.is_active = 1
         AND u.deleted_at IS NULL
-        AND r.role_name = 'dean'
         AND wda.user_id <> :userId
         AND wda.course_id = c.course_id
     )
@@ -267,14 +264,11 @@ export const replaceDeanAssignments = async (
       assigned.course_name
     FROM workflow_dean_assignments wda
     INNER JOIN users u ON u.user_id = wda.user_id
-    INNER JOIN user_roles ur ON ur.user_id = u.user_id
-    INNER JOIN roles r ON r.role_id = ur.role_id
     INNER JOIN courses assigned ON assigned.course_id = wda.course_id
     INNER JOIN workflow_course_scopes selected_scope
       ON selected_scope.course_id IN (:courseIds)
     WHERE wda.is_active = 1
       AND u.deleted_at IS NULL
-      AND r.role_name = 'dean'
       AND wda.user_id <> :userId
       AND wda.course_id = selected_scope.course_id
     LIMIT 1
