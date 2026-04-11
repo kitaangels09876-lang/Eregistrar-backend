@@ -64,6 +64,12 @@ SMTP_REPLY_TO=
 EMAIL_VERIFICATION_SECRET=another_long_random_secret_here
 EMAIL_VERIFICATION_EXPIRES_IN=1d
 
+# Render Free blocks outbound SMTP ports 25, 465, and 587.
+# Use an HTTPS mail API provider instead, for example:
+MAIL_PROVIDER=resend
+RESEND_API_KEY=
+RESEND_FROM=
+RESEND_REPLY_TO=
 
 ```
 
