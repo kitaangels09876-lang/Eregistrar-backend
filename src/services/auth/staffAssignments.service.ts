@@ -201,13 +201,7 @@ export const listAssignableDeanCourses = async (currentUserId?: number) => {
       WHERE wda.is_active = 1
         AND u.deleted_at IS NULL
         AND wda.user_id <> :userId
-        AND (
-          wda.course_id = c.course_id
-          OR (
-            wcs.department_id IS NOT NULL
-            AND wda.department_id = wcs.department_id
-          )
-        )
+        AND wda.course_id = c.course_id
     )
     ORDER BY c.course_name ASC
     `,
@@ -276,13 +270,7 @@ export const replaceDeanAssignments = async (
     WHERE wda.is_active = 1
       AND u.deleted_at IS NULL
       AND wda.user_id <> :userId
-      AND (
-        wda.course_id = selected_scope.course_id
-        OR (
-          selected_scope.department_id IS NOT NULL
-          AND wda.department_id = selected_scope.department_id
-        )
-      )
+      AND wda.course_id = selected_scope.course_id
     LIMIT 1
     `,
     {
