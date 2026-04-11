@@ -11,7 +11,7 @@ import { WorkflowRequestPayload } from "../../types/workflow";
 import { generateClaimStubPdf } from "./claimStubPdf.service";
 import { generateRequestFormPdf } from "./requestFormPdf.service";
 import { createNotification } from "../notification.service";
-import { sendEmail } from "../mail.service";
+import { isMailConfigured, sendEmail } from "../mail.service";
 import { logActivity } from "../../utils/auditlog.service";
 
 let schemaReady = false;
@@ -47,18 +47,18 @@ const QUEUE_ACCESS_RULES: Array<{
 }> = [
   {
     statuses: ["UNDER_DEAN_APPROVAL"],
-    roles: ["dean", "admin"],
-    permissions: ["approval.dean.view", "request.view.all"],
+    roles: ["dean"],
+    permissions: ["approval.dean.view"],
   },
   {
     statuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
-    roles: ["college_admin", "admin"],
-    permissions: ["approval.college_admin.view", "request.view.all"],
+    roles: ["college_admin"],
+    permissions: ["approval.college_admin.view"],
   },
   {
     statuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
-    roles: ["treasurer", "admin"],
-    permissions: ["payment.confirm", "request.view.all"],
+    roles: ["treasurer"],
+    permissions: ["payment.confirm"],
   },
 ];
 
@@ -95,22 +95,22 @@ const TARGET_STATUS_PERMISSION_RULES: Partial<Record<WorkflowStatus, string[]>> 
 };
 
 const TARGET_STATUS_ROLE_RULES: Partial<Record<WorkflowStatus, string[]>> = {
-  UNDER_REGISTRAR_VERIFICATION: ["registrar", "admin"],
-  UNDER_DEAN_APPROVAL: ["registrar", "admin"],
-  DEAN_APPROVED: ["dean", "admin"],
-  UNDER_COLLEGE_ADMIN_REVIEW: ["dean", "admin"],
-  COLLEGE_ADMIN_APPROVED: ["college_admin", "admin"],
-  FEE_ASSESSED: ["registrar", "admin"],
-  AWAITING_PAYMENT: ["registrar", "college_admin", "admin"],
-  PAYMENT_SUBMITTED: ["student", "alumni", "admin"],
-  PAYMENT_CONFIRMED: ["treasurer", "admin"],
-  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar", "admin"],
-  DOCUMENT_GENERATION: ["registrar", "admin"],
-  READY_FOR_RELEASE: ["registrar", "admin"],
-  CLAIMED: ["registrar", "admin"],
-  COMPLETED: ["registrar", "admin"],
-  CANCELLED: ["student", "alumni", "registrar", "admin"],
-  REJECTED: ["registrar", "dean", "college_admin", "admin"],
+  UNDER_REGISTRAR_VERIFICATION: ["registrar"],
+  UNDER_DEAN_APPROVAL: ["registrar"],
+  DEAN_APPROVED: ["dean"],
+  UNDER_COLLEGE_ADMIN_REVIEW: ["dean"],
+  COLLEGE_ADMIN_APPROVED: ["college_admin"],
+  FEE_ASSESSED: ["registrar"],
+  AWAITING_PAYMENT: ["registrar", "college_admin"],
+  PAYMENT_SUBMITTED: ["student", "alumni"],
+  PAYMENT_CONFIRMED: ["treasurer"],
+  UNDER_REGISTRAR_PROCESSING: ["treasurer", "registrar"],
+  DOCUMENT_GENERATION: ["registrar"],
+  READY_FOR_RELEASE: ["registrar"],
+  CLAIMED: ["registrar"],
+  COMPLETED: ["registrar"],
+  CANCELLED: ["student", "alumni", "registrar"],
+  REJECTED: ["registrar", "dean", "college_admin"],
 };
 
 const normalizeRoles = (roles: string[] = []) =>
@@ -216,13 +216,7 @@ type WorkflowEmailRecipient = {
   roles: string[];
 };
 
-const MAIL_REQUIRED_ENV_KEYS = [
-  "RESEND_API_KEY",
-  "RESEND_FROM",
-] as const;
-
-const isWorkflowEmailConfigured = () =>
-  MAIL_REQUIRED_ENV_KEYS.every((key) => Boolean(process.env[key]?.trim()));
+const isWorkflowEmailConfigured = () => isMailConfigured();
 
 const escapeHtml = (value: string) =>
   value
@@ -930,6 +924,13 @@ const promoteCollegeAdminApprovedRequests = async (
         getWorkflowRequestAcademicScope(updatedDetail).course_id
       );
 
+      await createWorkflowNotification({
+        userId: registrarScope.registrar_user_id,
+        title: "Registrar processing required",
+        message: `Request ${row.request_reference} skipped payment and has moved to registrar processing.`,
+        status: "UNDER_REGISTRAR_PROCESSING",
+      });
+
       await dispatchWorkflowStatusEmails({
         userIds: [registrarScope.registrar_user_id],
         requestReference: row.request_reference,
@@ -1543,57 +1544,57 @@ const WORKFLOW_ACTION_RULES: Record<
   { roles: string[]; permissions: string[]; currentStatuses: WorkflowStatus[] }
 > = {
   registrar_verification: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["request.verify"],
     currentStatuses: ["SUBMITTED", "UNDER_REGISTRAR_VERIFICATION"],
   },
   dean_approve: {
-    roles: ["dean", "admin"],
+    roles: ["dean"],
     permissions: ["approval.dean.approve"],
     currentStatuses: ["UNDER_DEAN_APPROVAL"],
   },
   college_admin_approve: {
-    roles: ["college_admin", "admin"],
+    roles: ["college_admin"],
     permissions: ["approval.college_admin.approve"],
     currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
   },
   fee_assess: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["payment.assess"],
     currentStatuses: ["COLLEGE_ADMIN_APPROVED"],
   },
   payment_submit: {
-    roles: ["student", "alumni", "admin"],
+    roles: ["student", "alumni"],
     permissions: ["payment.submit.own"],
     currentStatuses: ["AWAITING_PAYMENT"],
   },
   payment_confirm: {
-    roles: ["treasurer", "admin"],
+    roles: ["treasurer"],
     permissions: ["payment.confirm"],
     currentStatuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
   },
   document_prepare: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.prepare"],
     currentStatuses: ["UNDER_REGISTRAR_PROCESSING"],
   },
   document_finalize: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.generate"],
     currentStatuses: ["DOCUMENT_GENERATION"],
   },
   release_claim: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.claim"],
     currentStatuses: ["READY_FOR_RELEASE"],
   },
   release_complete: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["document.release", "document.claim"],
     currentStatuses: ["CLAIMED"],
   },
   request_cancel: {
-    roles: ["student", "alumni", "registrar", "admin"],
+    roles: ["student", "alumni", "registrar"],
     permissions: ["request.cancel.own", "request.cancel.any"],
     currentStatuses: [
       "SUBMITTED",
@@ -1608,17 +1609,17 @@ const WORKFLOW_ACTION_RULES: Record<
     ],
   },
   registrar_reject: {
-    roles: ["registrar", "admin"],
+    roles: ["registrar"],
     permissions: ["request.verify"],
     currentStatuses: ["UNDER_REGISTRAR_VERIFICATION", "UNDER_REGISTRAR_PROCESSING", "DOCUMENT_GENERATION"],
   },
   dean_reject: {
-    roles: ["dean", "admin"],
+    roles: ["dean"],
     permissions: ["approval.dean.approve"],
     currentStatuses: ["UNDER_DEAN_APPROVAL"],
   },
   college_admin_reject: {
-    roles: ["college_admin", "admin"],
+    roles: ["college_admin"],
     permissions: ["approval.college_admin.approve"],
     currentStatuses: ["UNDER_COLLEGE_ADMIN_REVIEW"],
   },
@@ -2733,7 +2734,7 @@ const regenerateDocument = async (workflowRequestId: number, actedByUserId: numb
         versionNumber: Number(versionRow?.nextVersion || 1),
         sourceStatus: detail.current_status,
         fileName: generated.fileName,
-        filePath: generated.relativePath,
+        filePath: generated.storagePath || generated.relativePath,
         generatedByUserId: actedByUserId,
       },
       type: QueryTypes.INSERT,
@@ -2823,7 +2824,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
         claimStubNumber,
         lookupTokenHash,
         fileName: generated.fileName,
-        filePath: generated.relativePath,
+        filePath: generated.storagePath || generated.relativePath,
       },
       type: QueryTypes.INSERT,
     }
@@ -2835,7 +2836,7 @@ const ensureClaimStub = async (workflowRequestId: number, actedByUserId: number)
     workflowRequestId,
     newValue: {
       claim_stub_number: claimStubNumber,
-      file_path: generated.relativePath,
+      file_path: generated.storagePath || generated.relativePath,
       verification_url: verificationUrl,
     },
   });
@@ -4226,6 +4227,16 @@ export const advanceWorkflowRequest = async (
       status: body.target_status,
     });
 
+    const treasurerRecipients = await listWorkflowEmailRecipientsByRoles(["treasurer"]);
+    for (const recipient of treasurerRecipients) {
+      await createWorkflowNotification({
+        userId: recipient.user_id,
+        title: "Payment confirmation required",
+        message: `Payment proof for request ${detail.request_reference} has been submitted and is awaiting your confirmation.`,
+        status: body.target_status,
+      });
+    }
+
     await dispatchWorkflowStatusEmails({
       roles: ["treasurer"],
       requestReference: detail.request_reference,
@@ -4248,6 +4259,15 @@ export const advanceWorkflowRequest = async (
       title: isPaymentSkipped ? "No payment required" : "Payment confirmed",
       message: isPaymentSkipped
         ? `Request ${detail.request_reference} qualified for first-time free processing and moved to registrar processing.`
+        : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
+      status: body.target_status,
+    });
+
+    await createWorkflowNotification({
+      userId: registrarScope.registrar_user_id,
+      title: "Registrar processing required",
+      message: isPaymentSkipped
+        ? `Request ${detail.request_reference} skipped payment and is now ready for registrar processing.`
         : `Request ${detail.request_reference} has cleared payment and returned to registrar processing.`,
       status: body.target_status,
     });
@@ -4422,6 +4442,46 @@ export const getWorkflowRequestLatestDocumentDownload = async (
   return document;
 };
 
+export const regenerateWorkflowRequestLatestDocumentDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests(workflowRequestId);
+
+  const detail = await getWorkflowRequestDetail(workflowRequestId, user);
+
+  if (
+    getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+    (!hasAnyPermission(user, ["document.view.own.allowed"]) ||
+      !detail.document_access?.can_download_generated_document)
+  ) {
+    throw new Error("Generated document download is not allowed for this request yet");
+  }
+
+  await regenerateDocument(workflowRequestId, user.user_id);
+
+  const [document]: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_generated_documents
+    WHERE workflow_request_id = :workflowRequestId
+    ORDER BY version_number DESC
+    LIMIT 1
+    `,
+    {
+      replacements: { workflowRequestId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  if (!document) {
+    throw new Error("No generated request form is available");
+  }
+
+  return document;
+};
+
 export const getWorkflowRequestClaimStub = async (
   workflowRequestId: number,
   user: AuthUser
@@ -4474,6 +4534,82 @@ export const getWorkflowRequestClaimStubDownload = async (
   return claimStub;
 };
 
+export const regenerateWorkflowRequestClaimStubDownload = async (
+  workflowRequestId: number,
+  user: AuthUser
+) => {
+  await ensureWorkflowSchema();
+  await autoCompleteClaimedRequests(workflowRequestId);
+
+  const detail = await getWorkflowRequestDetail(workflowRequestId, user);
+  const latestClaimStub = detail.latest_claim_stub;
+
+  if (!latestClaimStub) {
+    throw new Error("No claim stub is available for this request");
+  }
+
+  if (
+    getRoleNames(user).every((role) => !STAFF_ROLES.includes(role as any)) &&
+    (!hasAnyPermission(user, ["claim_stub.view.own", "claim_stub.download.own"]) ||
+      !detail.document_access?.can_download_claim_stub)
+  ) {
+    throw new Error("Claim stub access is not allowed for this request");
+  }
+
+  const verificationUrl = `${
+    process.env.FRONTEND_URL || "http://localhost:3000"
+  }/admin/workflow/claim-verification`;
+
+  const generated = await generateClaimStubPdf({
+    request_reference: detail.request_reference,
+    claim_stub_number: latestClaimStub.claim_stub_number,
+    current_status: detail.current_status,
+    submitted_at: detail.submitted_at,
+    academic_snapshot: detail.academic_snapshot,
+    release_snapshot: detail.release_snapshot,
+    items: detail.items,
+    purpose: detail.purpose,
+    lookup_token: latestClaimStub.claim_stub_number,
+    verification_url: verificationUrl,
+  });
+
+  await sequelize.query(
+    `
+    UPDATE workflow_claim_stubs
+    SET
+      file_name = :fileName,
+      file_path = :filePath,
+      generated_at = NOW()
+    WHERE workflow_claim_stub_id = :workflowClaimStubId
+    `,
+    {
+      replacements: {
+        workflowClaimStubId: Number(latestClaimStub.workflow_claim_stub_id),
+        fileName: generated.fileName,
+        filePath: generated.storagePath || generated.relativePath,
+      },
+      type: QueryTypes.UPDATE,
+    }
+  );
+
+  const [updatedClaimStub]: any[] = await sequelize.query(
+    `
+    SELECT *
+    FROM workflow_claim_stubs
+    WHERE workflow_claim_stub_id = :workflowClaimStubId
+    LIMIT 1
+    `,
+    {
+      replacements: {
+        workflowClaimStubId: Number(latestClaimStub.workflow_claim_stub_id),
+      },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return updatedClaimStub || latestClaimStub;
+};
+
 const parseClaimLookupToken = (lookupValue: string) => {
   const trimmed = lookupValue.trim();
   if (!trimmed) {
@@ -4501,10 +4637,10 @@ export const lookupWorkflowClaimStub = async (
 
   const roles = getRoleNames(user);
   if (
-    (!roles.includes("registrar") && !roles.includes("admin")) ||
+    !roles.includes("registrar") ||
     !hasAnyPermission(user, ["claim_stub.verify"])
   ) {
-    throw new Error("Only registrar or admin with claim stub verification permission can verify claim stubs");
+    throw new Error("Only registrar with claim stub verification permission can verify claim stubs");
   }
 
   const lookupToken = input.lookup_token ? parseClaimLookupToken(input.lookup_token) : "";

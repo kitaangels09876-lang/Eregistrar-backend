@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 interface MailPayload {
   to: string;
   subject: string;
@@ -5,7 +7,26 @@ interface MailPayload {
   html: string;
 }
 
-const RESEND_API_BASE_URL = "https://api.resend.com";
+interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  replyTo: string;
+}
+
+interface MailDebugSummary {
+  provider: "smtp";
+  host: string | null;
+  port: string | null;
+  secure: string | null;
+  from: string | null;
+  reply_to: string | null;
+}
+
+const SMTP_TIMEOUT_CODES = ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "ECONNRESET"];
 
 const getRequiredEnv = (key: string): string => {
   const value = process.env[key]?.trim();
@@ -20,16 +41,124 @@ const getRequiredEnv = (key: string): string => {
 const getOptionalEnv = (key: string): string =>
   process.env[key]?.trim() || "";
 
-const getResendConfig = () => {
-  const apiKey = getRequiredEnv("RESEND_API_KEY");
-  const from = getRequiredEnv("RESEND_FROM");
-  const replyTo = getOptionalEnv("RESEND_REPLY_TO");
+const parseSmtpPort = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    throw new Error("SMTP_PORT must be a valid TCP port number.");
+  }
+  return parsed;
+};
+
+const parseBooleanEnv = (
+  rawValue: string,
+  {
+    defaultValue,
+    keyName,
+  }: {
+    defaultValue: boolean;
+    keyName: string;
+  }
+): boolean => {
+  if (!rawValue) {
+    return defaultValue;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`${keyName} must be one of: true/false, 1/0, yes/no, on/off.`);
+};
+
+const getSmtpConfig = (): SmtpConfig => {
+  const host = getRequiredEnv("SMTP_HOST");
+  const portRaw = getRequiredEnv("SMTP_PORT");
+  const port = parseSmtpPort(portRaw);
+  const secureRaw = getOptionalEnv("SMTP_SECURE");
+  const secure = parseBooleanEnv(secureRaw, {
+    defaultValue: port === 465,
+    keyName: "SMTP_SECURE",
+  });
+  const user = getOptionalEnv("SMTP_USER");
+  const pass = getOptionalEnv("SMTP_PASS");
+  const from = getRequiredEnv("SMTP_FROM");
+  const replyTo = getOptionalEnv("SMTP_REPLY_TO");
+
+  if ((user && !pass) || (!user && pass)) {
+    throw new Error("SMTP_USER and SMTP_PASS must both be set or both be empty.");
+  }
 
   return {
-    apiKey,
+    host,
+    port,
+    secure,
+    user,
+    pass,
     from,
     replyTo,
   };
+};
+
+export const isMailConfigured = (): boolean => {
+  try {
+    void getSmtpConfig();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const getMailDebugSummary = (): MailDebugSummary => ({
+  provider: "smtp",
+  host: process.env.SMTP_HOST?.trim() || null,
+  port: process.env.SMTP_PORT?.trim() || null,
+  secure: process.env.SMTP_SECURE?.trim() || null,
+  from: process.env.SMTP_FROM?.trim() || null,
+  reply_to: process.env.SMTP_REPLY_TO?.trim() || null,
+});
+
+let cachedTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+let cachedTransporterKey = "";
+
+const getSmtpTransporter = (config: SmtpConfig) => {
+  const cacheKey = [
+    config.host,
+    String(config.port),
+    config.secure ? "secure" : "insecure",
+    config.user || "no-user",
+  ].join("|");
+
+  if (cachedTransporter && cachedTransporterKey === cacheKey) {
+    return cachedTransporter;
+  }
+
+  const transportOptions = {
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+    ...(config.user && config.pass
+      ? {
+          auth: {
+            user: config.user,
+            pass: config.pass,
+          },
+        }
+      : {}),
+  };
+
+  cachedTransporter = nodemailer.createTransport(transportOptions);
+  cachedTransporterKey = cacheKey;
+
+  return cachedTransporter;
 };
 
 export const sendEmail = async ({
@@ -38,50 +167,34 @@ export const sendEmail = async ({
   text,
   html,
 }: MailPayload): Promise<void> => {
-  const config = getResendConfig();
+  const config = getSmtpConfig();
+  const transporter = getSmtpTransporter(config);
 
   try {
-    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: config.from,
-        to: [to],
-        subject,
-        text,
-        html,
-        ...(config.replyTo ? { reply_to: config.replyTo } : {}),
-      }),
-      signal: AbortSignal.timeout(30000),
+    await transporter.sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+      html,
+      ...(config.replyTo ? { replyTo: config.replyTo } : {}),
     });
-
-    const responseData = (await response.json().catch(() => null)) as
-      | {
-          id?: string;
-          message?: string;
-          error?: {
-            message?: string;
-            name?: string;
-          };
-        }
-      | null;
-
-    if (!response.ok) {
-      throw new Error(
-        responseData?.message ||
-          responseData?.error?.message ||
-          `Resend email failed with status ${response.status}`
-      );
-    }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : String(error || "Unknown error");
+    const code =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? String((error as { code: string }).code)
+        : "";
 
-    if (message.toLowerCase().includes("timeout")) {
-      throw new Error("Resend email request timed out.");
+    if (
+      message.toLowerCase().includes("timeout") ||
+      SMTP_TIMEOUT_CODES.includes(code)
+    ) {
+      throw new Error("SMTP email request timed out.");
     }
 
     throw error;

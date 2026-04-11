@@ -9,6 +9,7 @@ import {
   replaceDeanAssignments,
   replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
+import { ensureUserSoftDeleteSchema } from "../services/auth/userSoftDelete.service";
 
 export const getAllAdminAndRegistrarAccounts = async (
   req: Request,
@@ -23,6 +24,8 @@ export const getAllAdminAndRegistrarAccounts = async (
   ];
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const search = (req.query.search as string) || "";
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
@@ -36,6 +39,7 @@ export const getAllAdminAndRegistrarAccounts = async (
       INNER JOIN user_roles ur ON ur.user_id = u.user_id
       INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE r.role_name IN (:staffRoles)
+        AND u.deleted_at IS NULL
         AND (
           :search = '' OR
           u.email LIKE :likeSearch OR
@@ -83,6 +87,7 @@ export const getAllAdminAndRegistrarAccounts = async (
         ON r.role_id = ur.role_id
 
       WHERE r.role_name IN (:staffRoles)
+        AND u.deleted_at IS NULL
         AND (
           :search = '' OR
           u.email LIKE :likeSearch OR
@@ -139,6 +144,8 @@ export const getAdminOrRegistrarById = async (
   ];
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const { userId } = req.params;
 
     if (!userId) {
@@ -178,6 +185,7 @@ export const getAdminOrRegistrarById = async (
 
       WHERE u.user_id = :userId
         AND r.role_name IN (:staffRoles)
+        AND u.deleted_at IS NULL
 
       GROUP BY u.user_id, ap.admin_id
       LIMIT 1
@@ -250,6 +258,8 @@ export const changeAdminOrRegistrarRole = async (
   ];
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const { userId } = req.params;
     const { role } = req.body;
 
@@ -280,7 +290,10 @@ export const changeAdminOrRegistrarRole = async (
  
     const userExists: any = await sequelize.query(
       `
-      SELECT user_id FROM users WHERE user_id = :userId
+      SELECT user_id
+      FROM users
+      WHERE user_id = :userId
+        AND deleted_at IS NULL
       `,
       {
         replacements: { userId },
@@ -352,6 +365,7 @@ export const changeAdminOrRegistrarRole = async (
       SET account_type = :accountType,
           updated_at = NOW()
       WHERE user_id = :userId
+        AND deleted_at IS NULL
       `,
       {
         replacements: {
@@ -394,6 +408,8 @@ export const changeAdminOrRegistrarStatus = async (
   ];
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const { userId } = req.params;
     const { status } = req.body; 
 
@@ -422,6 +438,7 @@ export const changeAdminOrRegistrarStatus = async (
       INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE u.user_id = :userId
         AND r.role_name IN (:staffRoles)
+        AND u.deleted_at IS NULL
       LIMIT 1
       `,
       {
@@ -445,6 +462,7 @@ export const changeAdminOrRegistrarStatus = async (
       SET status = :status,
           updated_at = NOW()
       WHERE user_id = :userId
+        AND deleted_at IS NULL
       `,
       {
         replacements: { status, userId },
@@ -469,10 +487,147 @@ export const changeAdminOrRegistrarStatus = async (
   }
 };
 
+export const softDeleteAdminOrRegistrarAccount = async (
+  req: Request,
+  res: Response
+) => {
+  const transaction = await sequelize.transaction();
+  const staffRoles = [
+    "admin",
+    "registrar",
+    "dean",
+    "college_admin",
+    "treasurer",
+  ];
+
+  try {
+    await ensureUserSoftDeleteSchema();
+
+    const authUserId = Number(req.user?.user_id);
+    const targetUserId = Number(req.params.userId);
+
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Valid user ID is required",
+      });
+    }
+
+    if (!Number.isInteger(authUserId) || authUserId <= 0) {
+      await transaction.rollback();
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required",
+      });
+    }
+
+    if (targetUserId === authUserId) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "You cannot delete your own account",
+      });
+    }
+
+    const userRows: Array<{
+      user_id: number;
+      roles: string | null;
+    }> = await sequelize.query(
+      `
+      SELECT
+        u.user_id,
+        GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.role_name SEPARATOR ',') AS roles
+      FROM users u
+      INNER JOIN user_roles ur ON ur.user_id = u.user_id
+      INNER JOIN roles r ON r.role_id = ur.role_id
+      WHERE u.user_id = :userId
+        AND u.deleted_at IS NULL
+        AND r.role_name IN (:staffRoles)
+      GROUP BY u.user_id
+      LIMIT 1
+      `,
+      {
+        replacements: { userId: targetUserId, staffRoles },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    if (userRows.length === 0) {
+      await transaction.rollback();
+      return res.status(404).json({
+        status: "error",
+        message: "User not found or already deleted",
+      });
+    }
+
+    const assignedRoles = String(userRows[0].roles || "")
+      .split(",")
+      .map((role) => role.trim().toLowerCase())
+      .filter(Boolean);
+
+    await sequelize.query(
+      `
+      UPDATE users
+      SET
+        status = 'inactive',
+        deleted_at = NOW(),
+        updated_at = NOW()
+      WHERE user_id = :userId
+        AND deleted_at IS NULL
+      `,
+      {
+        replacements: { userId: targetUserId },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    if (assignedRoles.includes("dean")) {
+      await clearDeanAssignments(targetUserId, transaction);
+    }
+
+    if (assignedRoles.includes("registrar")) {
+      await clearRegistrarAssignments(targetUserId, transaction);
+    }
+
+    await sequelize.query(
+      `
+      UPDATE refresh_tokens
+      SET revoked_at = NOW()
+      WHERE user_id = :userId
+        AND revoked_at IS NULL
+      `,
+      {
+        replacements: { userId: targetUserId },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      status: "success",
+      message: "User account soft deleted successfully",
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error("SOFT DELETE USER ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+    });
+  }
+};
+
 export const updateAdminAccount = async (req: Request, res: Response) => {
   const transaction = await sequelize.transaction();
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const authUser = req.user;
 
     if (!authUser?.user_id) {
@@ -648,7 +803,8 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       }
     }
 
-    const existingAccount = await User.findByPk(targetUserId, {
+    const existingAccount = await User.findOne({
+      where: { user_id: targetUserId, deleted_at: null },
       attributes: ["user_id"],
       transaction,
     });
@@ -739,7 +895,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       await User.update(
         userUpdates,
         {
-          where: { user_id: targetUserId },
+          where: { user_id: targetUserId, deleted_at: null },
           transaction,
         }
       );
@@ -832,7 +988,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
           account_type: normalizedRole === "registrar" ? "registrar" : "admin",
         },
         {
-          where: { user_id: targetUserId },
+          where: { user_id: targetUserId, deleted_at: null },
           transaction,
         }
       );

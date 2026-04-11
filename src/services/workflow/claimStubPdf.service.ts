@@ -196,6 +196,24 @@ const safeDateTime = (value: unknown) => {
   });
 };
 
+const safeDateOnly = (value: unknown) => {
+  if (!value) {
+    return "";
+  }
+
+  const parsed =
+    value instanceof Date ? value : new Date(typeof value === "string" || typeof value === "number" ? value : "");
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return parsed.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+};
+
 const line = (
   doc: PDFKit.PDFDocument,
   label: string,
@@ -326,12 +344,12 @@ export const generateClaimStubPdf = async (
     y += line(doc, "COURSE / PROGRAM:", upper(academic.course_name), 48, y, 460, 2);
     y += line(doc, "DOCUMENT REQUESTED:", request.items.map((item) => upper(item.document_name)).join(", "), 48, y, 460, 2);
     y += line(doc, "PURPOSE:", upper(request.purpose), 48, y, 460, 2);
-    y += line(doc, "REQUEST DATE:", safeDateTime(request.submitted_at), 48, y);
+    y += line(doc, "REQUEST DATE:", safeDateOnly(request.submitted_at), 48, y);
     const readyForReleaseDate =
       release.expected_release_date ||
       release.ready_for_release_at ||
       release.date_released;
-    y += line(doc, "READY FOR RELEASE DATE:", safeDateTime(readyForReleaseDate), 48, y);
+    y += line(doc, "READY FOR RELEASE DATE:", safeDateOnly(readyForReleaseDate), 48, y);
     y += line(doc, "RELEASE METHOD:", upper(release.release_method || "PICKUP"), 48, y);
     y += line(doc, "CLAIM LOCATION:", "OFFICE OF THE REGISTRAR", 48, y);
 
@@ -374,18 +392,25 @@ export const generateClaimStubPdf = async (
     stream.on("error", (error) => reject(error));
   });
 
-  await uploadLocalFileToCloudinary({
-    filePath: absolutePath,
-    fileName,
-    mimeType: "application/pdf",
-    folder: "eregistrar/workflow/claim-stubs",
-    publicId: request.claim_stub_number,
-    resourceType: "image",
-  });
+  // Keep local file path as the primary source so PDF delivery does not depend on
+  // Cloudinary's PDF access policy. Upload is best-effort for backup only.
+  try {
+    await uploadLocalFileToCloudinary({
+      filePath: absolutePath,
+      fileName,
+      mimeType: "application/pdf",
+      folder: "eregistrar/workflow/claim-stubs",
+      publicId: request.claim_stub_number,
+      resourceType: "image",
+    });
+  } catch (error) {
+    console.warn("Claim stub Cloudinary upload failed; serving local PDF path instead.", error);
+  }
 
   return {
     fileName,
     absolutePath,
     relativePath,
+    storagePath: relativePath,
   };
 };

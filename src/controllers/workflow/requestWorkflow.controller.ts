@@ -15,6 +15,8 @@ import {
   listWorkflowRequests,
   lookupWorkflowClaimStub,
   processWorkflowAction,
+  regenerateWorkflowRequestClaimStubDownload,
+  regenerateWorkflowRequestLatestDocumentDownload,
 } from "../../services/workflow/requestWorkflow.service";
 import { WorkflowStatus } from "../../constants/workflow";
 import { WorkflowRequestPayload } from "../../types/workflow";
@@ -54,23 +56,102 @@ const resolveWorkflowErrorStatus = (error: unknown) => {
 const buildInlineFileName = (fileName?: string | null, fallback = "document.pdf") =>
   (fileName || fallback).replace(/[\r\n"]/g, "").trim() || fallback;
 
+const workspaceRoot = path.resolve(process.cwd());
+
+const isPathInsideWorkspace = (candidatePath: string) => {
+  const resolvedCandidate = path.resolve(candidatePath).toLowerCase();
+  const normalizedRoot = workspaceRoot.toLowerCase();
+
+  return (
+    resolvedCandidate === normalizedRoot ||
+    resolvedCandidate.startsWith(`${normalizedRoot}${path.sep}`)
+  );
+};
+
+const addLocalCandidatePath = (
+  candidates: string[],
+  candidatePath?: string | null
+) => {
+  if (!candidatePath) {
+    return;
+  }
+
+  const resolved = path.resolve(candidatePath);
+
+  if (!isPathInsideWorkspace(resolved)) {
+    return;
+  }
+
+  if (!candidates.includes(resolved)) {
+    candidates.push(resolved);
+  }
+};
+
+const resolveLocalAssetPath = (assetPath: string, fileName?: string | null) => {
+  const candidates: string[] = [];
+  const normalizedAssetPath = String(assetPath || "").trim().replace(/^file:\/\//i, "");
+
+  if (normalizedAssetPath && !/^https?:\/\//i.test(normalizedAssetPath)) {
+    const normalizedSeparators = normalizedAssetPath
+      .replace(/^\/+/, "")
+      .replace(/[\\/]+/g, path.sep);
+
+    if (path.isAbsolute(normalizedAssetPath)) {
+      addLocalCandidatePath(candidates, normalizedAssetPath);
+    }
+
+    addLocalCandidatePath(candidates, path.join(process.cwd(), normalizedSeparators));
+    addLocalCandidatePath(candidates, path.join(process.cwd(), "dist", normalizedSeparators));
+
+    const uploadsMarker = `uploads${path.sep}`;
+    const uploadsIndex = normalizedSeparators.toLowerCase().indexOf(uploadsMarker);
+    if (uploadsIndex >= 0) {
+      const fromUploads = normalizedSeparators.slice(uploadsIndex);
+      addLocalCandidatePath(candidates, path.join(process.cwd(), fromUploads));
+    }
+  }
+
+  const safeFileName = fileName ? path.basename(String(fileName)) : "";
+  if (safeFileName) {
+    addLocalCandidatePath(
+      candidates,
+      path.join(process.cwd(), "uploads", "workflow", "claim-stubs", safeFileName)
+    );
+    addLocalCandidatePath(
+      candidates,
+      path.join(process.cwd(), "uploads", "workflow", "forms", safeFileName)
+    );
+    addLocalCandidatePath(candidates, path.join(process.cwd(), "uploads", safeFileName));
+  }
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+};
+
 const sendInlineAsset = async (
   res: Response,
   assetPath: string,
   fileName?: string | null
 ) => {
   const safeFileName = buildInlineFileName(fileName);
+  const normalizedAssetPath = String(assetPath || "").trim();
 
   res.setHeader("Content-Disposition", `inline; filename="${safeFileName}"`);
   res.setHeader("Content-Type", "application/pdf");
 
-  if (/^https?:\/\//i.test(assetPath)) {
-    const assetResponse = await fetch(assetPath, { signal: AbortSignal.timeout(30000) });
+  if (/^https?:\/\//i.test(normalizedAssetPath)) {
+    const assetResponse = await fetch(normalizedAssetPath, {
+      signal: AbortSignal.timeout(30000),
+    });
 
     if (!assetResponse.ok) {
+      const localFallbackPath = resolveLocalAssetPath("", fileName);
+      if (localFallbackPath) {
+        return res.sendFile(localFallbackPath);
+      }
+
       if (
         assetResponse.status === 401 &&
-        /cloudinary\.com/i.test(assetPath)
+        /cloudinary\.com/i.test(normalizedAssetPath)
       ) {
         throw new Error(
           "PDF delivery is blocked by Cloudinary. Enable 'Allow delivery of PDF and ZIP files' in your Cloudinary security settings or use a paid plan."
@@ -86,10 +167,8 @@ const sendInlineAsset = async (
     return res.status(200).send(payload);
   }
 
-  const normalizedPath = assetPath.replace(/^\/+/, "").replace(/\//g, path.sep);
-  const absolutePath = path.join(process.cwd(), normalizedPath);
-
-  if (!fs.existsSync(absolutePath)) {
+  const absolutePath = resolveLocalAssetPath(normalizedAssetPath, fileName);
+  if (!absolutePath) {
     throw new Error("Stored file not found");
   }
 
@@ -477,12 +556,25 @@ export const downloadWorkflowRequestLatestDocumentHandler = async (
   res: Response
 ) => {
   try {
-    const data = await getWorkflowRequestLatestDocumentDownload(
-      Number(req.params.workflowRequestId || req.params.requestId),
-      getAuthUser(req)
-    );
+    const workflowRequestId = Number(req.params.workflowRequestId || req.params.requestId);
+    const authUser = getAuthUser(req);
+    let data = await getWorkflowRequestLatestDocumentDownload(workflowRequestId, authUser);
 
-    return await sendInlineAsset(res, data.file_path, data.file_name);
+    try {
+      return await sendInlineAsset(res, data.file_path, data.file_name);
+    } catch (inlineError: any) {
+      const inlineMessage = String(inlineError?.message || "").toLowerCase();
+      if (
+        !inlineMessage.includes("stored file not found") &&
+        !inlineMessage.includes("pdf delivery is blocked by cloudinary") &&
+        !inlineMessage.includes("unable to load file from storage")
+      ) {
+        throw inlineError;
+      }
+
+      data = await regenerateWorkflowRequestLatestDocumentDownload(workflowRequestId, authUser);
+      return await sendInlineAsset(res, data.file_path, data.file_name);
+    }
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
@@ -518,12 +610,27 @@ export const downloadWorkflowRequestClaimStubHandler = async (
   res: Response
 ) => {
   try {
-    const data = await getWorkflowRequestClaimStubDownload(
-      Number(req.params.workflowRequestId || req.params.requestId),
-      getAuthUser(req)
-    );
+    const workflowRequestId = Number(req.params.workflowRequestId || req.params.requestId);
+    const authUser = getAuthUser(req);
+    let data = await getWorkflowRequestClaimStubDownload(workflowRequestId, authUser);
+    const resolveClaimStubFileName = (claimStubData: any) =>
+      claimStubData.file_name || `${claimStubData.claim_stub_number}.pdf`;
 
-    return await sendInlineAsset(res, data.file_path, data.file_name || data.claim_stub_number);
+    try {
+      return await sendInlineAsset(res, data.file_path, resolveClaimStubFileName(data));
+    } catch (inlineError: any) {
+      const inlineMessage = String(inlineError?.message || "").toLowerCase();
+      if (
+        !inlineMessage.includes("stored file not found") &&
+        !inlineMessage.includes("pdf delivery is blocked by cloudinary") &&
+        !inlineMessage.includes("unable to load file from storage")
+      ) {
+        throw inlineError;
+      }
+
+      data = await regenerateWorkflowRequestClaimStubDownload(workflowRequestId, authUser);
+      return await sendInlineAsset(res, data.file_path, resolveClaimStubFileName(data));
+    }
   } catch (error: any) {
     return res.status(resolveWorkflowErrorStatus(error)).json({
       status: "error",
