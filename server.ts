@@ -25,6 +25,11 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 const normalizeOrigin = (value: string) => value.trim().replace(/\/$/, "");
+const defaultAllowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://eregistrar-frontend.vercel.app",
+];
 
 const getAllowedOrigins = () => {
   const configuredOrigins = [
@@ -38,8 +43,7 @@ const getAllowedOrigins = () => {
 
   return Array.from(
     new Set([
-      "http://localhost:3000",
-      "http://localhost:5173",
+      ...defaultAllowedOrigins,
       ...configuredOrigins,
     ])
   );

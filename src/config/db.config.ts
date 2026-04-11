@@ -10,6 +10,22 @@ const databaseUrlEnvNames = [
 
 const trimEnv = (name: string) => process.env[name]?.trim() || '';
 
+const isRailwayEnvironment = () =>
+    Boolean(
+        trimEnv('RAILWAY_ENVIRONMENT') ||
+            trimEnv('RAILWAY_PROJECT_ID') ||
+            trimEnv('RAILWAY_SERVICE_ID') ||
+            trimEnv('RAILWAY_DEPLOYMENT_ID')
+    );
+
+const canUseHostFromCurrentEnvironment = (host: string) => {
+    if (!host.endsWith('.internal')) {
+        return true;
+    }
+
+    return host.endsWith('.railway.internal') && isRailwayEnvironment();
+};
+
 const assertPlainHost = (host: string) => {
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host) || host.includes('/')) {
         throw new Error(
@@ -20,20 +36,20 @@ const assertPlainHost = (host: string) => {
 
 const getUnresolvableHostHint = (host: string) => {
     if (host.endsWith('.railway.internal')) {
-        return ' Railway internal hosts only resolve inside Railway; use the public Railway database host/port on Render.';
+        return ' Railway internal hosts only resolve inside Railway; use the public Railway database host/port when deploying outside Railway.';
     }
 
     if (host.endsWith('.internal')) {
-        return ' Internal hostnames only resolve inside their provider network; use the public database host/port from Render.';
+        return ' Internal hostnames only resolve inside their provider network; use the public database host and port when deploying outside that provider.';
     }
 
     return '';
 };
 
 const assertResolvableHost = (host: string, source: string) => {
-    if (host.endsWith('.internal')) {
+    if (!canUseHostFromCurrentEnvironment(host)) {
         throw new Error(
-            `Database host "${host}" from ${source} is private/internal and cannot be reached from Render.${getUnresolvableHostHint(host)}`
+            `Database host "${host}" from ${source} is private/internal and cannot be reached from this deploy environment.${getUnresolvableHostHint(host)}`
         );
     }
 };
@@ -107,7 +123,7 @@ const createSequelizeInstance = () => {
             throw new Error(`${databaseUrlConfig.name} must be a valid MySQL connection URL.`);
         }
 
-        if (!parsedUrl.hostname.endsWith('.internal')) {
+        if (canUseHostFromCurrentEnvironment(parsedUrl.hostname)) {
             return new Sequelize(databaseUrlConfig.value, baseOptions);
         }
 

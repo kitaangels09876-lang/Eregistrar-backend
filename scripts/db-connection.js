@@ -10,6 +10,22 @@ const databaseUrlEnvNames = [
   "DATABASE_URL",
 ];
 
+const isRailwayEnvironment = () =>
+  Boolean(
+    trimEnv("RAILWAY_ENVIRONMENT") ||
+      trimEnv("RAILWAY_PROJECT_ID") ||
+      trimEnv("RAILWAY_SERVICE_ID") ||
+      trimEnv("RAILWAY_DEPLOYMENT_ID")
+  );
+
+const canUseHostFromCurrentEnvironment = (host) => {
+  if (!host.endsWith(".internal")) {
+    return true;
+  }
+
+  return host.endsWith(".railway.internal") && isRailwayEnvironment();
+};
+
 const getDatabaseUrlHost = (databaseUrl) => {
   try {
     return new URL(databaseUrl).hostname;
@@ -28,20 +44,20 @@ const assertPlainHost = (host) => {
 
 const getUnresolvableHostHint = (host) => {
   if (host.endsWith(".railway.internal")) {
-    return " Railway internal hosts only resolve inside Railway; use the public Railway database host/port on Render.";
+    return " Railway internal hosts only resolve inside Railway; use the public Railway database host/port when deploying outside Railway.";
   }
 
   if (host.endsWith(".internal")) {
-    return " Internal hostnames only resolve inside their provider network; use the public database host/port from Render.";
+    return " Internal hostnames only resolve inside their provider network; use the public database host and port when deploying outside that provider.";
   }
 
   return "";
 };
 
 const assertResolvableHost = (host, source) => {
-  if (host.endsWith(".internal")) {
+  if (!canUseHostFromCurrentEnvironment(host)) {
     throw new Error(
-      `Database host "${host}" from ${source} is private/internal and cannot be reached from Render.${getUnresolvableHostHint(host)}`
+      `Database host "${host}" from ${source} is private/internal and cannot be reached from this deploy environment.${getUnresolvableHostHint(host)}`
     );
   }
 };
@@ -112,7 +128,7 @@ const getDatabaseConnectionConfig = () => {
       );
     }
 
-    if (!host.endsWith(".internal")) {
+    if (canUseHostFromCurrentEnvironment(host)) {
       return {
         source: databaseUrlConfig.name,
         host,
