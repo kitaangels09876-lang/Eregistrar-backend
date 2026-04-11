@@ -123,12 +123,14 @@ export const listDeanAssignments = async (
     course_id: number;
     course_code: string;
     course_name: string;
+    department: string | null;
   }> = await sequelize.query(
     `
     SELECT
       wda.course_id,
       c.course_code,
-      c.course_name
+      c.course_name,
+      c.department
     FROM workflow_dean_assignments wda
     INNER JOIN courses c ON c.course_id = wda.course_id
     WHERE wda.user_id = :userId
