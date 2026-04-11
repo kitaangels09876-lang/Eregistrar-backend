@@ -1,5 +1,5 @@
 import express from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { sequelize } from "./src/models";
@@ -24,16 +24,54 @@ dotenv.config({ quiet: true });
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigin = (process.env.FRONTEND_URL || "http://localhost:3000").trim();
+const normalizeOrigin = (value: string) => value.trim().replace(/\/$/, "");
 
-app.use(
-  cors({
-    origin: allowedOrigin,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    exposedHeaders: ["Authorization"],
-  })
-);
+const getAllowedOrigins = () => {
+  const configuredOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.CORS_ORIGINS,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .flatMap((value) => value.split(","))
+    .map(normalizeOrigin)
+    .filter(Boolean);
+
+  return Array.from(
+    new Set([
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "https://eregistrar-frontend.vercel.app",
+      ...configuredOrigins,
+    ])
+  );
+};
+
+const allowedOrigins = getAllowedOrigins();
+const corsOptions: CorsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      callback(null, true);
+      return;
+    }
+
+    console.warn(`CORS blocked origin: ${origin}`);
+    callback(null, false);
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -81,9 +119,7 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`Server running at http://localhost:${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
-      console.log(
-        `Frontend: ${process.env.FRONTEND_URL || "http://localhost:3000"}`
-      );
+      console.log(`Allowed CORS origins: ${allowedOrigins.join(", ")}`);
     });
   } catch (error) {
     console.error("Application startup failed:", error);
