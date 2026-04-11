@@ -73,6 +73,10 @@ For hosted deploys, set the same variables in your hosting provider dashboard, o
 DATABASE_URL=mysql://user:password@host:3306/database
 ```
 
+On Render, you can also set `DATABASE_PUBLIC_URL` or `MYSQL_PUBLIC_URL` to the
+public MySQL URL. These are preferred over `DATABASE_URL`, which is useful if
+your provider also exposes a private/internal URL.
+
 If the backend is deployed on Render and the database is on another provider,
 do not use that provider's private/internal hostname for `DB_HOST`. Use the
 public database host and port, or deploy the backend where the private hostname

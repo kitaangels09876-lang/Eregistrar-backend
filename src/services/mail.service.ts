@@ -18,12 +18,16 @@ interface SmtpConfig {
 }
 
 interface MailDebugSummary {
-  provider: "smtp";
+  provider: string | null;
+  transport: "smtp";
   host: string | null;
   port: string | null;
   secure: string | null;
   from: string | null;
   reply_to: string | null;
+  smtp_user_configured: boolean;
+  smtp_pass_configured: boolean;
+  suspicious_env: string[];
 }
 
 const SMTP_TIMEOUT_CODES = ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "ECONNRESET"];
@@ -40,6 +44,33 @@ const getRequiredEnv = (key: string): string => {
 
 const getOptionalEnv = (key: string): string =>
   process.env[key]?.trim() || "";
+
+const hasEmbeddedEnvAssignment = (value: string): boolean =>
+  /[A-Z_][A-Z0-9_]*=/i.test(value);
+
+const getSuspiciousMailEnv = (): string[] => {
+  const suspiciousKeys: string[] = [];
+
+  for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"]) {
+    const value = process.env[key]?.trim();
+
+    if (value && hasEmbeddedEnvAssignment(value)) {
+      suspiciousKeys.push(key);
+    }
+  }
+
+  return suspiciousKeys;
+};
+
+const redactEmail = (email: string): string => {
+  const [name, domain] = email.split("@");
+
+  if (!name || !domain) {
+    return "[invalid-email]";
+  }
+
+  return `${name.slice(0, 2)}***@${domain}`;
+};
 
 const parseSmtpPort = (value: string): number => {
   const parsed = Number(value);
@@ -77,6 +108,15 @@ const parseBooleanEnv = (
 };
 
 const getSmtpConfig = (): SmtpConfig => {
+  const suspiciousEnv = getSuspiciousMailEnv();
+  if (suspiciousEnv.length > 0) {
+    throw new Error(
+      `Mail env value looks malformed; check for missing newlines near: ${suspiciousEnv.join(
+        ", "
+      )}.`
+    );
+  }
+
   const host = getRequiredEnv("SMTP_HOST");
   const portRaw = getRequiredEnv("SMTP_PORT");
   const port = parseSmtpPort(portRaw);
@@ -115,13 +155,52 @@ export const isMailConfigured = (): boolean => {
 };
 
 export const getMailDebugSummary = (): MailDebugSummary => ({
-  provider: "smtp",
+  provider: process.env.MAIL_PROVIDER?.trim() || null,
+  transport: "smtp",
   host: process.env.SMTP_HOST?.trim() || null,
   port: process.env.SMTP_PORT?.trim() || null,
   secure: process.env.SMTP_SECURE?.trim() || null,
   from: process.env.SMTP_FROM?.trim() || null,
   reply_to: process.env.SMTP_REPLY_TO?.trim() || null,
+  smtp_user_configured: Boolean(process.env.SMTP_USER?.trim()),
+  smtp_pass_configured: Boolean(process.env.SMTP_PASS?.trim()),
+  suspicious_env: getSuspiciousMailEnv(),
 });
+
+export const getMailErrorDebugDetails = (error: unknown) => {
+  const details: Record<string, unknown> = {
+    summary: getMailDebugSummary(),
+  };
+
+  if (error instanceof Error) {
+    details.name = error.name;
+    details.message = error.message;
+  } else {
+    details.message = String(error || "Unknown error");
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const maybeSmtpError = error as {
+      code?: unknown;
+      command?: unknown;
+      responseCode?: unknown;
+    };
+
+    if (maybeSmtpError.code) {
+      details.code = maybeSmtpError.code;
+    }
+
+    if (maybeSmtpError.command) {
+      details.command = maybeSmtpError.command;
+    }
+
+    if (maybeSmtpError.responseCode) {
+      details.responseCode = maybeSmtpError.responseCode;
+    }
+  }
+
+  return details;
+};
 
 let cachedTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let cachedTransporterKey = "";
@@ -171,6 +250,12 @@ export const sendEmail = async ({
   const transporter = getSmtpTransporter(config);
 
   try {
+    console.info("[mail] Sending email", {
+      to: redactEmail(to),
+      subject,
+      summary: getMailDebugSummary(),
+    });
+
     await transporter.sendMail({
       from: config.from,
       to,
@@ -179,7 +264,15 @@ export const sendEmail = async ({
       html,
       ...(config.replyTo ? { replyTo: config.replyTo } : {}),
     });
+
+    console.info("[mail] Email sent", {
+      to: redactEmail(to),
+      subject,
+      summary: getMailDebugSummary(),
+    });
   } catch (error) {
+    console.error("[mail] Email send failed", getMailErrorDebugDetails(error));
+
     const message =
       error instanceof Error ? error.message : String(error || "Unknown error");
     const code =

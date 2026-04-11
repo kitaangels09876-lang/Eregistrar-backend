@@ -17,7 +17,11 @@ import { getPermissionsForRoles } from "../services/auth/permission.service";
     sendEmailVerificationEmail,
     verifyEmailVerificationToken,
   } from "../services/emailVerification.service";
-  import { getMailDebugSummary, sendEmail } from "../services/mail.service";
+  import {
+    getMailDebugSummary,
+    getMailErrorDebugDetails,
+    sendEmail,
+  } from "../services/mail.service";
 import {
   sendSingleFieldValidationError,
   sendValidationError,
@@ -340,7 +344,7 @@ export const registerStudent = async (req: Request, res: Response) => {
 
       console.error(
         "REGISTER STUDENT EMAIL DELIVERY ERROR:",
-        emailErrorMessage
+        getMailErrorDebugDetails(mailError)
       );
 
       return res.status(201).json({
@@ -1126,7 +1130,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
 
       console.error(
         "VERIFICATION EMAIL DELIVERY ERROR:",
-        emailErrorMessage
+        getMailErrorDebugDetails(mailError)
       );
 
       if (!isProductionEnvironment()) {
@@ -1218,7 +1222,7 @@ From address: ${mailSummary.from || "not configured"}
     const message = getErrorMessage(error);
     const mailSummary = getMailDebugSummary();
 
-    console.error("MAIL TEST EMAIL ERROR:", message);
+    console.error("MAIL TEST EMAIL ERROR:", getMailErrorDebugDetails(error));
 
     return res.status(503).json({
       status: "error",

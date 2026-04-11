@@ -4,6 +4,11 @@ const dotenv = require("dotenv");
 dotenv.config({ quiet: true });
 
 const trimEnv = (name) => process.env[name]?.trim() || "";
+const databaseUrlEnvNames = [
+  "DATABASE_PUBLIC_URL",
+  "MYSQL_PUBLIC_URL",
+  "DATABASE_URL",
+];
 
 const getDatabaseUrlHost = (databaseUrl) => {
   try {
@@ -33,23 +38,27 @@ const getUnresolvableHostHint = (host) => {
   return "";
 };
 
-const getDatabaseConnectionConfig = () => {
-  const databaseUrl = trimEnv("DATABASE_URL");
+const assertResolvableHost = (host, source) => {
+  if (host.endsWith(".internal")) {
+    throw new Error(
+      `Database host "${host}" from ${source} is private/internal and cannot be reached from Render.${getUnresolvableHostHint(host)}`
+    );
+  }
+};
 
-  if (databaseUrl) {
-    const host = getDatabaseUrlHost(databaseUrl);
+const getDatabaseUrlConfig = () => {
+  for (const name of databaseUrlEnvNames) {
+    const value = trimEnv(name);
 
-    if (!host) {
-      throw new Error("DATABASE_URL must be a valid MySQL connection URL.");
+    if (value) {
+      return { name, value };
     }
-
-    return {
-      source: "DATABASE_URL",
-      host,
-      options: { uri: databaseUrl },
-    };
   }
 
+  return null;
+};
+
+const getSplitDatabaseConnectionConfig = () => {
   const host = trimEnv("DB_HOST");
   const user = trimEnv("DB_USER");
   const password = process.env.DB_PASSWORD || "";
@@ -71,6 +80,7 @@ const getDatabaseConnectionConfig = () => {
   }
 
   assertPlainHost(host);
+  assertResolvableHost(host, "DB_HOST");
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("DB_PORT must be a valid port number.");
@@ -87,6 +97,37 @@ const getDatabaseConnectionConfig = () => {
       database,
     },
   };
+};
+
+const getDatabaseConnectionConfig = () => {
+  const databaseUrlConfig = getDatabaseUrlConfig();
+
+  if (databaseUrlConfig) {
+    const databaseUrl = databaseUrlConfig.value;
+    const host = getDatabaseUrlHost(databaseUrl);
+
+    if (!host) {
+      throw new Error(
+        `${databaseUrlConfig.name} must be a valid MySQL connection URL.`
+      );
+    }
+
+    if (!host.endsWith(".internal")) {
+      return {
+        source: databaseUrlConfig.name,
+        host,
+        options: { uri: databaseUrl },
+      };
+    }
+
+    if (trimEnv("DB_HOST") && trimEnv("DB_USER") && trimEnv("DB_NAME")) {
+      return getSplitDatabaseConnectionConfig();
+    }
+
+    assertResolvableHost(host, databaseUrlConfig.name);
+  }
+
+  return getSplitDatabaseConnectionConfig();
 };
 
 const createDatabaseConnection = async (
