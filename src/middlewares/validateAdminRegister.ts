@@ -118,13 +118,6 @@ export const validateAdminRegister = (
     });
   }
 
-  if (role?.trim().toLowerCase() === "dean" && normalizedDeanCourseIds.length === 0) {
-    errors.push({
-      field: "dean_course_ids",
-      message: "Select at least one course assignment for the dean role",
-    });
-  }
-
   if (
     role?.trim().toLowerCase() === "registrar" &&
     normalizedRegistrarCourseIds.length === 0

@@ -25,7 +25,7 @@ export class DeanCourseAssignmentConflictError extends Error {
   }
 }
 
-const ensureWorkflowAssignmentSchema = async () => {
+export const ensureWorkflowAssignmentSchema = async () => {
   if (assignmentSchemaReady) {
     return;
   }
@@ -164,6 +164,128 @@ export const clearDeanAssignments = async (
       transaction,
     }
   );
+};
+
+export const setDeanAssignmentForCourse = async (
+  courseId: number,
+  deanUserId: number | null,
+  transaction: Transaction
+) => {
+  await ensureWorkflowAssignmentSchema();
+
+  if (!Number.isInteger(courseId) || courseId <= 0) {
+    throw new Error("Valid course ID is required");
+  }
+
+  if (deanUserId === null) {
+    await sequelize.query(
+      `
+      DELETE FROM workflow_dean_assignments
+      WHERE course_id = :courseId
+      `,
+      {
+        replacements: { courseId },
+        type: QueryTypes.DELETE,
+        transaction,
+      }
+    );
+
+    return null;
+  }
+
+  if (!Number.isInteger(deanUserId) || deanUserId <= 0) {
+    throw new Error("Select a valid dean account");
+  }
+
+  const scopeRows: Array<{
+    course_id: number;
+    department_id: number | null;
+    college_id: number | null;
+  }> = await sequelize.query(
+    `
+    SELECT course_id, department_id, college_id
+    FROM workflow_course_scopes
+    WHERE course_id = :courseId
+    LIMIT 1
+    `,
+    {
+      replacements: { courseId },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  if (scopeRows.length === 0) {
+    throw new Error(
+      "This course is missing workflow scope setup. Configure its workflow scope before assigning a dean."
+    );
+  }
+
+  const deanRows: Array<{ user_id: number }> = await sequelize.query(
+    `
+    SELECT u.user_id
+    FROM users u
+    INNER JOIN user_roles ur ON ur.user_id = u.user_id
+    INNER JOIN roles r ON r.role_id = ur.role_id
+    WHERE u.user_id = :deanUserId
+      AND u.deleted_at IS NULL
+      AND r.role_name = 'dean'
+    LIMIT 1
+    `,
+    {
+      replacements: { deanUserId },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  if (deanRows.length === 0) {
+    throw new Error("Select a valid dean account");
+  }
+
+  const scope = scopeRows[0];
+
+  await sequelize.query(
+    `
+    DELETE FROM workflow_dean_assignments
+    WHERE course_id = :courseId
+    `,
+    {
+      replacements: { courseId },
+      type: QueryTypes.DELETE,
+      transaction,
+    }
+  );
+
+  await sequelize.query(
+    `
+    INSERT INTO workflow_dean_assignments (
+      user_id,
+      course_id,
+      department_id,
+      college_id,
+      is_active
+    ) VALUES (
+      :deanUserId,
+      :courseId,
+      :departmentId,
+      :collegeId,
+      1
+    )
+    `,
+    {
+      replacements: {
+        deanUserId,
+        courseId,
+        departmentId: scope.department_id,
+        collegeId: scope.college_id,
+      },
+      type: QueryTypes.INSERT,
+      transaction,
+    }
+  );
+
+  return deanUserId;
 };
 
 export const listAssignableDeanCourses = async (currentUserId?: number) => {

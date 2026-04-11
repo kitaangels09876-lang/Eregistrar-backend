@@ -36,7 +36,6 @@ import {
   DeanCourseAssignmentConflictError,
   listDeanAssignments,
   listRegistrarAssignments,
-  replaceDeanAssignments,
   replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
 import { ensureUserSoftDeleteSchema } from "../services/auth/userSoftDelete.service";
@@ -214,7 +213,6 @@ export const registerStaff = async (req: Request, res: Response) => {
       middle_name,
       last_name,
       contact_number,
-      dean_course_ids,
       registrar_course_ids,
     } = req.body;
 
@@ -288,10 +286,6 @@ export const registerStaff = async (req: Request, res: Response) => {
         transaction,
       }
     );
-
-    if (role === "dean") {
-      await replaceDeanAssignments(user.user_id, dean_course_ids, transaction);
-    }
 
     if (role === "registrar") {
       await replaceRegistrarAssignments(

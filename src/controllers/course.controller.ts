@@ -1,20 +1,44 @@
 import { Request, Response } from "express";
 import { sequelize } from "../models";
 import { QueryTypes } from "sequelize";
+import {
+  ensureWorkflowAssignmentSchema,
+  setDeanAssignmentForCourse,
+} from "../services/auth/staffAssignments.service";
 
 export const getAllCourses = async (req: Request, res: Response) => {
   try {
+    await ensureWorkflowAssignmentSchema();
+
     const courses = await sequelize.query(
       `
       SELECT
-        course_id,
-        course_code,
-        course_name,
-        course_description,
-        department,
-        created_at
-      FROM courses
-      ORDER BY course_name ASC
+        c.course_id,
+        c.course_code,
+        c.course_name,
+        c.course_description,
+        c.department,
+        c.created_at,
+        da.user_id AS dean_user_id,
+        du.email AS dean_email,
+        TRIM(CONCAT_WS(' ', ap.first_name, ap.middle_name, ap.last_name)) AS dean_name
+      FROM courses c
+      LEFT JOIN (
+        SELECT
+          wda.course_id,
+          MIN(wda.user_id) AS user_id
+        FROM workflow_dean_assignments wda
+        INNER JOIN users u ON u.user_id = wda.user_id
+        INNER JOIN user_roles ur ON ur.user_id = u.user_id
+        INNER JOIN roles r ON r.role_id = ur.role_id
+        WHERE wda.is_active = 1
+          AND u.deleted_at IS NULL
+          AND r.role_name = 'dean'
+        GROUP BY wda.course_id
+      ) da ON da.course_id = c.course_id
+      LEFT JOIN users du ON du.user_id = da.user_id
+      LEFT JOIN admin_profiles ap ON ap.user_id = du.user_id
+      ORDER BY c.course_name ASC
       `,
       { type: QueryTypes.SELECT }
     );
@@ -34,38 +58,68 @@ export const getAllCourses = async (req: Request, res: Response) => {
 
 
 export const updateCourse = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+
   try {
+    await ensureWorkflowAssignmentSchema();
+
     const { courseId } = req.params;
     const {
       course_code,
       course_name,
       course_description,
       department,
+      dean_user_id,
     } = req.body;
+    const hasDeanUserIdInput = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "dean_user_id"
+    );
+    const normalizedCourseId = Number(courseId);
+    const normalizedDeanUserId =
+      dean_user_id === null || dean_user_id === "" || dean_user_id === undefined
+        ? null
+        : Number(dean_user_id);
 
-    if (!courseId) {
+    if (!Number.isInteger(normalizedCourseId) || normalizedCourseId <= 0) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
-        message: "Course ID is required",
+        message: "Valid course ID is required",
       });
     }
 
     if (!course_code || !course_name) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Course code and course name are required",
       });
     }
 
+    if (
+      hasDeanUserIdInput &&
+      normalizedDeanUserId !== null &&
+      (!Number.isInteger(normalizedDeanUserId) || normalizedDeanUserId <= 0)
+    ) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: "Select a valid dean account",
+      });
+    }
+
     const existingCourse: any[] = await sequelize.query(
       `SELECT course_id FROM courses WHERE course_id = :courseId`,
       {
-        replacements: { courseId },
+        replacements: { courseId: normalizedCourseId },
         type: QueryTypes.SELECT,
+        transaction,
       }
     );
 
     if (existingCourse.length === 0) {
+      await transaction.rollback();
       return res.status(404).json({
         status: "error",
         message: "Course not found",
@@ -80,12 +134,14 @@ export const updateCourse = async (req: Request, res: Response) => {
         AND course_id != :courseId
       `,
       {
-        replacements: { course_code, courseId },
+        replacements: { course_code, courseId: normalizedCourseId },
         type: QueryTypes.SELECT,
+        transaction,
       }
     );
 
     if (duplicateCode.length > 0) {
+      await transaction.rollback();
       return res.status(400).json({
         status: "error",
         message: "Course code already exists",
@@ -104,25 +160,45 @@ export const updateCourse = async (req: Request, res: Response) => {
       `,
       {
         replacements: {
-          courseId,
+          courseId: normalizedCourseId,
           course_code,
           course_name,
           course_description: course_description || null,
           department: department || null,
         },
         type: QueryTypes.UPDATE,
+        transaction,
       }
     );
+
+    if (hasDeanUserIdInput) {
+      await setDeanAssignmentForCourse(
+        normalizedCourseId,
+        normalizedDeanUserId,
+        transaction
+      );
+    }
+
+    await transaction.commit();
 
     return res.status(200).json({
       status: "success",
       message: "Course updated successfully",
     });
-  } catch (error) {
+  } catch (error: any) {
+    await transaction.rollback();
     console.error("UPDATE COURSE ERROR:", error);
-    return res.status(500).json({
+
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
+    const isValidationError =
+      message === "Select a valid dean account" ||
+      message.includes("workflow scope") ||
+      message.includes("Valid course ID");
+
+    return res.status(isValidationError ? 400 : 500).json({
       status: "error",
-      message: "Internal server error",
+      message: isValidationError ? message : "Internal server error",
     });
   }
 };

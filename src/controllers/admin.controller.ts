@@ -897,16 +897,6 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
     const currentRole = currentRoleRows[0]?.role_name || null;
     const nextRole = normalizedRole ?? currentRole;
 
-    if (nextRole === "dean") {
-      if ((normalizedRole === "dean" || hasDeanCourseIdsInput) && normalizedDeanCourseIds.length === 0) {
-        await transaction.rollback();
-        return res.status(400).json({
-          status: "error",
-          message: "Select at least one course assignment for the dean role",
-        });
-      }
-    }
-
     if (nextRole === "registrar") {
       if (
         (normalizedRole === "registrar" || hasRegistrarCourseIdsInput) &&
@@ -1050,7 +1040,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
       );
     }
 
-    if (nextRole === "dean" && hasDeanCourseIdsInput) {
+    if (nextRole === "dean" && hasDeanCourseIdsInput && normalizedDeanCourseIds.length > 0) {
       await replaceDeanAssignments(targetUserId, normalizedDeanCourseIds, transaction);
     } else if (nextRole !== "dean" && (currentRole === "dean" || hasDeanCourseIdsInput)) {
       await clearDeanAssignments(targetUserId, transaction);
