@@ -1,38 +1,61 @@
-import nodemailer from "nodemailer";
+import axios from "axios";
 
 interface MailPayload {
   to: string;
   subject: string;
   text: string;
   html: string;
+  debugContext?: Record<string, unknown>;
 }
 
-interface SmtpConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  pass: string;
-  from: string;
+interface BrevoConfig {
+  apiKey: string;
+  endpoint: string;
+  senderEmail: string;
+  senderName: string;
   replyTo: string;
 }
 
 interface MailDebugSummary {
-  transport: "smtp";
-  host: string | null;
-  port: string | null;
-  secure: string | null;
-  from: string | null;
+  transport: "brevo_rest";
+  endpoint: string;
+  sender_email: string | null;
+  sender_name: string | null;
   reply_to: string | null;
-  smtp_user_configured: boolean;
-  smtp_pass_configured: boolean;
+  brevo_api_key_configured: boolean;
   suspicious_env: string[];
 }
 
-const SMTP_TIMEOUT_CODES = ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "ECONNRESET"];
+const BREVO_DEFAULT_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
+const BREVO_TIMEOUT_CODES = ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "ECONNRESET"];
+
+const getRenderDebugSummary = () => ({
+  is_render: Boolean(process.env.RENDER),
+  service_name: process.env.RENDER_SERVICE_NAME || null,
+  service_type: process.env.RENDER_SERVICE_TYPE || null,
+  instance_id_configured: Boolean(process.env.RENDER_INSTANCE_ID),
+});
+
+const stripMatchingQuotes = (value: string): string => {
+  const trimmed = value.trim();
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+
+  if (
+    trimmed.length >= 2 &&
+    ((first === '"' && last === '"') || (first === "'" && last === "'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+
+  return trimmed;
+};
+
+const getEnv = (key: string): string =>
+  stripMatchingQuotes(process.env[key] || "");
 
 const getRequiredEnv = (key: string): string => {
-  const value = process.env[key]?.trim();
+  const value = getEnv(key);
 
   if (!value) {
     throw new Error(`${key} is not configured`);
@@ -41,8 +64,7 @@ const getRequiredEnv = (key: string): string => {
   return value;
 };
 
-const getOptionalEnv = (key: string): string =>
-  process.env[key]?.trim() || "";
+const getOptionalEnv = (key: string): string => getEnv(key);
 
 const hasEmbeddedEnvAssignment = (value: string): boolean =>
   /[A-Z_][A-Z0-9_]*=/i.test(value);
@@ -50,7 +72,7 @@ const hasEmbeddedEnvAssignment = (value: string): boolean =>
 const getSuspiciousMailEnv = (): string[] => {
   const suspiciousKeys: string[] = [];
 
-  for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"]) {
+  for (const key of ["BREVO_FROM_EMAIL", "BREVO_FROM_NAME", "BREVO_REPLY_TO"]) {
     const value = process.env[key]?.trim();
 
     if (value && hasEmbeddedEnvAssignment(value)) {
@@ -71,42 +93,23 @@ const redactEmail = (email: string): string => {
   return `${name.slice(0, 2)}***@${domain}`;
 };
 
-const parseSmtpPort = (value: string): number => {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
-    throw new Error("SMTP_PORT must be a valid TCP port number.");
+const redactEmailLikeValue = (value: string | null): string | null => {
+  if (!value) {
+    return null;
   }
-  return parsed;
+
+  const match = value.match(/([^<>\s]+@[^<>\s]+)/);
+  if (!match) {
+    return value;
+  }
+
+  return value.replace(match[1], redactEmail(match[1]));
 };
 
-const parseBooleanEnv = (
-  rawValue: string,
-  {
-    defaultValue,
-    keyName,
-  }: {
-    defaultValue: boolean;
-    keyName: string;
-  }
-): boolean => {
-  if (!rawValue) {
-    return defaultValue;
-  }
+const createMailTraceId = () =>
+  `mail_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-  const normalized = rawValue.trim().toLowerCase();
-
-  if (["1", "true", "yes", "on"].includes(normalized)) {
-    return true;
-  }
-
-  if (["0", "false", "no", "off"].includes(normalized)) {
-    return false;
-  }
-
-  throw new Error(`${keyName} must be one of: true/false, 1/0, yes/no, on/off.`);
-};
-
-const getSmtpConfig = (): SmtpConfig => {
+const getBrevoConfig = (): BrevoConfig => {
   const suspiciousEnv = getSuspiciousMailEnv();
   if (suspiciousEnv.length > 0) {
     throw new Error(
@@ -116,37 +119,33 @@ const getSmtpConfig = (): SmtpConfig => {
     );
   }
 
-  const host = getRequiredEnv("SMTP_HOST");
-  const portRaw = getRequiredEnv("SMTP_PORT");
-  const port = parseSmtpPort(portRaw);
-  const secureRaw = getOptionalEnv("SMTP_SECURE");
-  const secure = parseBooleanEnv(secureRaw, {
-    defaultValue: port === 465,
-    keyName: "SMTP_SECURE",
-  });
-  const user = getOptionalEnv("SMTP_USER");
-  const pass = getOptionalEnv("SMTP_PASS");
-  const from = getRequiredEnv("SMTP_FROM");
-  const replyTo = getOptionalEnv("SMTP_REPLY_TO");
+  const apiKey = getRequiredEnv("BREVO_API_KEY");
+  const endpoint = getOptionalEnv("BREVO_API_URL") || BREVO_DEFAULT_ENDPOINT;
+  const senderEmail = getRequiredEnv("BREVO_FROM_EMAIL");
+  const senderName = getOptionalEnv("BREVO_FROM_NAME") || "eRegistrar";
+  const replyTo = getOptionalEnv("BREVO_REPLY_TO");
 
-  if ((user && !pass) || (!user && pass)) {
-    throw new Error("SMTP_USER and SMTP_PASS must both be set or both be empty.");
+  try {
+    const parsedEndpoint = new URL(endpoint);
+    if (parsedEndpoint.protocol !== "https:") {
+      throw new Error();
+    }
+  } catch {
+    throw new Error("BREVO_API_URL must be a valid HTTPS URL.");
   }
 
   return {
-    host,
-    port,
-    secure,
-    user,
-    pass,
-    from,
+    apiKey,
+    endpoint,
+    senderEmail,
+    senderName,
     replyTo,
   };
 };
 
 export const isMailConfigured = (): boolean => {
   try {
-    void getSmtpConfig();
+    void getBrevoConfig();
     return true;
   } catch {
     return false;
@@ -154,16 +153,21 @@ export const isMailConfigured = (): boolean => {
 };
 
 export const getMailDebugSummary = (): MailDebugSummary => ({
-  transport: "smtp",
-  host: process.env.SMTP_HOST?.trim() || null,
-  port: process.env.SMTP_PORT?.trim() || null,
-  secure: process.env.SMTP_SECURE?.trim() || null,
-  from: process.env.SMTP_FROM?.trim() || null,
-  reply_to: process.env.SMTP_REPLY_TO?.trim() || null,
-  smtp_user_configured: Boolean(process.env.SMTP_USER?.trim()),
-  smtp_pass_configured: Boolean(process.env.SMTP_PASS?.trim()),
+  transport: "brevo_rest",
+  endpoint: getOptionalEnv("BREVO_API_URL") || BREVO_DEFAULT_ENDPOINT,
+  sender_email: redactEmailLikeValue(getOptionalEnv("BREVO_FROM_EMAIL") || null),
+  sender_name: getOptionalEnv("BREVO_FROM_NAME") || "eRegistrar",
+  reply_to: redactEmailLikeValue(getOptionalEnv("BREVO_REPLY_TO") || null),
+  brevo_api_key_configured: Boolean(getOptionalEnv("BREVO_API_KEY")),
   suspicious_env: getSuspiciousMailEnv(),
 });
+
+export const logMailStartupDebug = () => {
+  console.info("[mail] Startup Brevo REST debug summary", {
+    mail: getMailDebugSummary(),
+    runtime: getRenderDebugSummary(),
+  });
+};
 
 export const getMailErrorDebugDetails = (error: unknown) => {
   const details: Record<string, unknown> = {
@@ -177,65 +181,37 @@ export const getMailErrorDebugDetails = (error: unknown) => {
     details.message = String(error || "Unknown error");
   }
 
+  if (axios.isAxiosError(error)) {
+    details.status = error.response?.status;
+    details.response_data = error.response?.data;
+  }
+
   if (typeof error === "object" && error !== null) {
-    const maybeSmtpError = error as {
+    const maybeNetworkError = error as {
       code?: unknown;
       command?: unknown;
       responseCode?: unknown;
     };
 
-    if (maybeSmtpError.code) {
-      details.code = maybeSmtpError.code;
+    if (maybeNetworkError.code) {
+      details.code = maybeNetworkError.code;
     }
 
-    if (maybeSmtpError.command) {
-      details.command = maybeSmtpError.command;
+    if (maybeNetworkError.command) {
+      details.command = maybeNetworkError.command;
     }
 
-    if (maybeSmtpError.responseCode) {
-      details.responseCode = maybeSmtpError.responseCode;
+    if (maybeNetworkError.responseCode) {
+      details.responseCode = maybeNetworkError.responseCode;
     }
   }
 
   return details;
 };
 
-let cachedTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
-let cachedTransporterKey = "";
-
-const getSmtpTransporter = (config: SmtpConfig) => {
-  const cacheKey = [
-    config.host,
-    String(config.port),
-    config.secure ? "secure" : "insecure",
-    config.user || "no-user",
-  ].join("|");
-
-  if (cachedTransporter && cachedTransporterKey === cacheKey) {
-    return cachedTransporter;
-  }
-
-  const transportOptions = {
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    ...(config.user && config.pass
-      ? {
-          auth: {
-            user: config.user,
-            pass: config.pass,
-          },
-        }
-      : {}),
-  };
-
-  cachedTransporter = nodemailer.createTransport(transportOptions);
-  cachedTransporterKey = cacheKey;
-
-  return cachedTransporter;
+const buildBrevoTag = (debugContext?: Record<string, unknown>) => {
+  const rawTag = String(debugContext?.flow || "eregistrar");
+  return rawTag.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50) || "eregistrar";
 };
 
 export const sendEmail = async ({
@@ -243,33 +219,74 @@ export const sendEmail = async ({
   subject,
   text,
   html,
+  debugContext,
 }: MailPayload): Promise<void> => {
-  const config = getSmtpConfig();
-  const transporter = getSmtpTransporter(config);
+  const traceId = createMailTraceId();
+  let config: BrevoConfig;
 
   try {
-    console.info("[mail] Sending email", {
+    config = getBrevoConfig();
+  } catch (error) {
+    console.error("[mail] Brevo REST config failed", {
+      trace_id: traceId,
+      context: debugContext || null,
+      error: getMailErrorDebugDetails(error),
+      runtime: getRenderDebugSummary(),
+    });
+    throw error;
+  }
+
+  console.info("[mail] Brevo REST send starting", {
+    trace_id: traceId,
+    to: redactEmail(to),
+    subject,
+    context: debugContext || null,
+    mail: getMailDebugSummary(),
+    runtime: getRenderDebugSummary(),
+  });
+
+  try {
+    const response = await axios.post(
+      config.endpoint,
+      {
+        sender: {
+          email: config.senderEmail,
+          name: config.senderName,
+        },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: text,
+        ...(config.replyTo ? { replyTo: { email: config.replyTo } } : {}),
+        tags: [buildBrevoTag(debugContext)],
+      },
+      {
+        headers: {
+          accept: "application/json",
+          "api-key": config.apiKey,
+          "content-type": "application/json",
+        },
+        timeout: 30000,
+      }
+    );
+
+    console.info("[mail] Brevo REST send succeeded", {
+      trace_id: traceId,
       to: redactEmail(to),
       subject,
-      summary: getMailDebugSummary(),
-    });
-
-    await transporter.sendMail({
-      from: config.from,
-      to,
-      subject,
-      text,
-      html,
-      ...(config.replyTo ? { replyTo: config.replyTo } : {}),
-    });
-
-    console.info("[mail] Email sent", {
-      to: redactEmail(to),
-      subject,
-      summary: getMailDebugSummary(),
+      status: response.status,
+      message_id_configured: Boolean(response.data?.messageId),
+      context: debugContext || null,
     });
   } catch (error) {
-    console.error("[mail] Email send failed", getMailErrorDebugDetails(error));
+    console.error("[mail] Brevo REST send failed", {
+      trace_id: traceId,
+      to: redactEmail(to),
+      subject,
+      context: debugContext || null,
+      error: getMailErrorDebugDetails(error),
+      runtime: getRenderDebugSummary(),
+    });
 
     const message =
       error instanceof Error ? error.message : String(error || "Unknown error");
@@ -283,9 +300,17 @@ export const sendEmail = async ({
 
     if (
       message.toLowerCase().includes("timeout") ||
-      SMTP_TIMEOUT_CODES.includes(code)
+      BREVO_TIMEOUT_CODES.includes(code)
     ) {
-      throw new Error("SMTP email request timed out.");
+      throw new Error("Brevo REST email request timed out.");
+    }
+
+    if (axios.isAxiosError(error)) {
+      const detail =
+        typeof error.response?.data === "object" && error.response?.data !== null
+          ? JSON.stringify(error.response.data)
+          : error.response?.data || error.message;
+      throw new Error(`Brevo REST email request failed: ${detail}`);
     }
 
     throw error;

@@ -61,6 +61,9 @@ const getVerificationUrlForUser = (userId: number, email: string): string =>
     })
   );
 
+const createAuthTraceId = () =>
+  `auth_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
 const buildAuthScopes = (
   roles: string[],
   profile: any,
@@ -236,6 +239,7 @@ export const registerStaff = async (req: Request, res: Response) => {
 };
 
 export const registerStudent = async (req: Request, res: Response) => {
+  const authTraceId = createAuthTraceId();
   const transaction = await sequelize.transaction();
   const rollbackTransaction = async () => {
     if (!(transaction as any).finished) {
@@ -258,6 +262,17 @@ export const registerStudent = async (req: Request, res: Response) => {
       course_id,
       year_level
     } = req.body;
+
+    console.info("[auth] Student registration started", {
+      trace_id: authTraceId,
+      email_domain:
+        typeof email === "string" && email.includes("@")
+          ? email.split("@").pop()
+          : null,
+      student_number_configured: Boolean(student_number),
+      course_id,
+      year_level,
+    });
 
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
@@ -333,18 +348,40 @@ export const registerStudent = async (req: Request, res: Response) => {
 
     await transaction.commit();
 
+    console.info("[auth] Student registration committed; sending verification email", {
+      trace_id: authTraceId,
+      user_id: user.user_id,
+      student_id: student.student_id,
+      email_domain: user.email.split("@").pop() || null,
+    });
+
     try {
       await sendEmailVerificationEmail({
         userId: user.user_id,
         email: user.email,
         firstName: student.first_name,
+        debugContext: {
+          auth_trace_id: authTraceId,
+          registration_flow: "student_register",
+        },
+      });
+
+      console.info("[auth] Student verification email completed", {
+        trace_id: authTraceId,
+        user_id: user.user_id,
+        student_id: student.student_id,
       });
     } catch (mailError) {
       const emailErrorMessage = getErrorMessage(mailError);
 
       console.error(
         "REGISTER STUDENT EMAIL DELIVERY ERROR:",
-        getMailErrorDebugDetails(mailError)
+        {
+          trace_id: authTraceId,
+          user_id: user.user_id,
+          student_id: student.student_id,
+          error: getMailErrorDebugDetails(mailError),
+        }
       );
 
       return res.status(201).json({
@@ -464,7 +501,7 @@ export const registerStudent = async (req: Request, res: Response) => {
     return res.status(500).json({
       status: "error",
       message:
-        error?.message?.includes("SMTP") ||
+        error?.message?.includes("Brevo") ||
         error?.message?.includes("verification")
           ? "Failed to send verification email"
           : "Internal server error",
@@ -1163,7 +1200,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
   }
 };
 
-export const testSmtpConnection = async (req: Request, res: Response) => {
+export const testMailConnection = async (req: Request, res: Response) => {
   try {
     const authenticatedEmail =
       typeof req.user?.email === "string" ? req.user.email.trim().toLowerCase() : "";
@@ -1196,7 +1233,7 @@ This is a test email from eRegistrar.
 
 Sent at: ${new Date().toISOString()}
 Transport: ${mailSummary.transport}
-From address: ${mailSummary.from || "not configured"}
+From address: ${mailSummary.sender_email || "not configured"}
 `,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #1f2937;">
@@ -1205,7 +1242,7 @@ From address: ${mailSummary.from || "not configured"}
           <p style="margin-bottom: 16px;">This is a test email from eRegistrar.</p>
           <p style="margin-bottom: 8px;"><strong>Sent at:</strong> ${new Date().toISOString()}</p>
           <p style="margin-bottom: 8px;"><strong>Transport:</strong> ${mailSummary.transport}</p>
-          <p style="margin-bottom: 8px;"><strong>From address:</strong> ${mailSummary.from || "not configured"}</p>
+          <p style="margin-bottom: 8px;"><strong>From address:</strong> ${mailSummary.sender_email || "not configured"}</p>
         </div>
       `,
     });

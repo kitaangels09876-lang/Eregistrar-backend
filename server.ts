@@ -18,6 +18,7 @@ import courseRoutes from "./src/routes/course.routes";
 import noticationRoutes from "./src/routes/notification.routes";
 import workflowRequestRoutes from "./src/routes/workflow/requestWorkflow.routes";
 import { ensureDefaultDocumentTypes } from "./src/services/defaultDocumentSeed.service";
+import { logMailStartupDebug } from "./src/services/mail.service";
 
 dotenv.config({ quiet: true });
 
@@ -123,6 +124,7 @@ const startServer = async () => {
       console.log(`Server running at http://localhost:${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`Allowed CORS origins: ${allowedOrigins.join(", ")}`);
+      logMailStartupDebug();
     });
   } catch (error) {
     console.error("Application startup failed:", error);

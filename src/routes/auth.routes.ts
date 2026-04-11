@@ -6,7 +6,7 @@ import {
   checkAuth,
   refreshAccessToken,
   registerStudent,
-  testSmtpConnection,
+  testMailConnection,
   verifyEmail,
   resendVerificationEmail
 } from "../controllers/auth.controller";
@@ -60,10 +60,10 @@ router.get("/verify-email", verifyEmail);
 router.post("/resend-verification-email", resendVerificationEmail);
 
 router.post(
-  "/test-smtp",
+  "/test-mail",
   authenticateToken,
   requireRole("admin"),
-  testSmtpConnection
+  testMailConnection
 );
 
 

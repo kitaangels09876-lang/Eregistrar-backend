@@ -11,6 +11,7 @@ interface SendVerificationEmailParams {
   userId: number;
   email: string;
   firstName?: string | null;
+  debugContext?: Record<string, unknown>;
 }
 
 const getVerificationSecret = (): string => {
@@ -126,6 +127,7 @@ export const sendEmailVerificationEmail = async ({
   userId,
   email,
   firstName,
+  debugContext,
 }: SendVerificationEmailParams): Promise<string> => {
   const token = generateEmailVerificationToken({
     user_id: userId,
@@ -142,6 +144,14 @@ export const sendEmailVerificationEmail = async ({
     subject,
     text,
     html,
+    debugContext: {
+      flow: "email_verification",
+      user_id: userId,
+      backend_url_configured: Boolean(process.env.BACKEND_URL?.trim()),
+      verification_expires_in:
+        process.env.EMAIL_VERIFICATION_EXPIRES_IN || "1d",
+      ...(debugContext || {}),
+    },
   });
 
   return verificationUrl;

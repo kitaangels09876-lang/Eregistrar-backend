@@ -51,15 +51,15 @@ FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:3001
 
 # ==========================================
-# EMAIL DELIVERY (SMTP / NODEMAILER)
+# EMAIL DELIVERY (BREVO TRANSACTIONAL REST API)
 # ==========================================
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=
-SMTP_REPLY_TO=
+BREVO_API_KEY=
+BREVO_FROM_EMAIL=
+BREVO_FROM_NAME=eRegistrar
+BREVO_REPLY_TO=
+
+# Optional override. Leave blank to use Brevo's default transactional email endpoint.
+BREVO_API_URL=https://api.brevo.com/v3/smtp/email
 
 EMAIL_VERIFICATION_SECRET=another_long_random_secret_here
 EMAIL_VERIFICATION_EXPIRES_IN=1d
