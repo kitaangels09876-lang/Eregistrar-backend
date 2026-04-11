@@ -1,7 +1,6 @@
-const mysql = require("mysql2/promise");
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
+const { createDatabaseConnection } = require("./db-connection");
 
-const databaseUrl = process.env.DATABASE_URL?.trim();
 const requiredTables = [
   "users",
   "roles",
@@ -12,11 +11,7 @@ const requiredTables = [
 const importSql = require("./import-sql");
 
 const getMissingTables = async () => {
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not configured.");
-  }
-
-  const connection = await mysql.createConnection({ uri: databaseUrl });
+  const connection = await createDatabaseConnection();
 
   try {
     const [rows] = await connection.query(
@@ -40,11 +35,7 @@ const getMissingTables = async () => {
 };
 
 const hasDefaultSeedData = async () => {
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not configured.");
-  }
-
-  const connection = await mysql.createConnection({ uri: databaseUrl });
+  const connection = await createDatabaseConnection();
 
   try {
     const [rows] = await connection.query(

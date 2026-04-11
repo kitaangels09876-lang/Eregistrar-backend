@@ -5,7 +5,7 @@ import { QueryTypes } from "sequelize";
 import { sequelize } from "../src/models";
 import { uploadLocalFileToCloudinary } from "../src/utils/cloudinaryStorage";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const requiredEnvKeys = [
   "CLOUDINARY_CLOUD_NAME",

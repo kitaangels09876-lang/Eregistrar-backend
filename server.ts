@@ -19,7 +19,7 @@ import noticationRoutes from "./src/routes/notification.routes";
 import workflowRequestRoutes from "./src/routes/workflow/requestWorkflow.routes";
 import { ensureDefaultDocumentTypes } from "./src/services/defaultDocumentSeed.service";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const app = express();
 const PORT = process.env.PORT || 5000;

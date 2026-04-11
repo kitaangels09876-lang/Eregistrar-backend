@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 
 export const generateToken = (user: any) => {
   const { user_id, email, roles, account_type } = user;

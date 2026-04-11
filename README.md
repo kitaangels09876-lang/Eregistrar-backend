@@ -62,6 +62,18 @@ EMAIL_VERIFICATION_EXPIRES_IN=1d
 
 
 ```
+
+For hosted deploys, set the same variables in your hosting provider dashboard, or set one full MySQL connection string as:
+
+```
+DATABASE_URL=mysql://user:password@host:3306/database
+```
+
+If the backend is deployed on Render and the database is on another provider,
+do not use that provider's private/internal hostname for `DB_HOST`. Use the
+public database host and port, or deploy the backend where the private hostname
+is reachable.
+
 ### d. Install nodemodule:
 ```
 npm install

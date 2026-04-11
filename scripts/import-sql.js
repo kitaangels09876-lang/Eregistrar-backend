@@ -1,9 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const mysql = require("mysql2/promise");
-require("dotenv").config();
-
-const databaseUrl = process.env.DATABASE_URL?.trim();
+require("dotenv").config({ quiet: true });
+const {
+  createDatabaseConnection,
+  getDatabaseConnectionConfig,
+} = require("./db-connection");
 
 const stripLocalDatabaseDirectives = (sql) =>
   sql
@@ -148,10 +149,6 @@ async function main(options = {}) {
   const dryRun = options.dryRun ?? process.env.DRY_RUN === "1";
   const schemaOnly = options.schemaOnly ?? process.env.SCHEMA_ONLY === "1";
 
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not configured.");
-  }
-
   if (!fs.existsSync(sqlPath)) {
     throw new Error(`SQL file not found: ${sqlPath}`);
   }
@@ -204,13 +201,12 @@ async function main(options = {}) {
     return;
   }
 
-  const connection = await mysql.createConnection({
-    uri: databaseUrl,
-  });
+  const databaseConfig = getDatabaseConnectionConfig();
+  const connection = await createDatabaseConnection(databaseConfig);
 
   try {
     console.log(
-      `Importing ${path.basename(sqlPath)} into DATABASE_URL with ${executableStatements.length} statements...`
+      `Importing ${path.basename(sqlPath)} into ${databaseConfig.source} with ${executableStatements.length} statements...`
     );
 
     for (const statement of executableStatements) {
