@@ -40,7 +40,6 @@ const getAllowedOrigins = () => {
     new Set([
       "http://localhost:3000",
       "http://localhost:5173",
-      "https://eregistrar-frontend.vercel.app",
       ...configuredOrigins,
     ])
   );
