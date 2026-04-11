@@ -33,6 +33,7 @@ import {
   revokeRefreshTokenById,
 } from "../services/auth/refreshToken.service";
 import {
+  DeanCourseAssignmentConflictError,
   listDeanAssignments,
   listRegistrarAssignments,
   replaceDeanAssignments,
@@ -63,6 +64,98 @@ const getVerificationUrlForUser = (userId: number, email: string): string =>
 
 const createAuthTraceId = () =>
   `auth_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const onlyActiveUserWhere = (email: string) => ({
+  email,
+  deleted_at: null,
+});
+
+const buildReleasedEmail = (email: string, userId: number): string => {
+  const [localPart, ...domainParts] = email.split("@");
+  const domain = domainParts.join("@");
+  const suffix = `deleted_${userId}_${Date.now()}`;
+
+  return domain
+    ? `${localPart}+${suffix}@${domain}`
+    : `${email}+${suffix}`;
+};
+
+const releaseSoftDeletedUserEmail = async (
+  email: string,
+  transaction: any
+) => {
+  const rows: Array<{ user_id: number; email: string }> = await sequelize.query(
+    `
+    SELECT user_id, email
+    FROM users
+    WHERE email = :email
+      AND deleted_at IS NOT NULL
+    `,
+    {
+      replacements: { email },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  for (const row of rows) {
+    await sequelize.query(
+      `
+      UPDATE users
+      SET email = :email,
+          updated_at = NOW()
+      WHERE user_id = :userId
+      `,
+      {
+        replacements: {
+          email: buildReleasedEmail(row.email, row.user_id),
+          userId: row.user_id,
+        },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+  }
+};
+
+const releaseSoftDeletedStudentNumber = async (
+  studentNumber: string,
+  transaction: any
+) => {
+  const rows: Array<{ student_id: number }> = await sequelize.query(
+    `
+    SELECT sp.student_id
+    FROM student_profiles sp
+    INNER JOIN users u ON sp.user_id = u.user_id
+    WHERE sp.student_number = :studentNumber
+      AND u.deleted_at IS NOT NULL
+    `,
+    {
+      replacements: { studentNumber },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  for (const row of rows) {
+    await sequelize.query(
+      `
+      UPDATE student_profiles
+      SET student_number = :studentNumber,
+          updated_at = NOW()
+      WHERE student_id = :studentId
+      `,
+      {
+        replacements: {
+          studentNumber: `${row.student_id}-deleted_${Date.now()}`,
+          studentId: row.student_id,
+        },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+  }
+};
 
 const buildAuthScopes = (
   roles: string[],
@@ -111,6 +204,8 @@ export const registerStaff = async (req: Request, res: Response) => {
   ];
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const {
       email,
       password,
@@ -141,7 +236,10 @@ export const registerStaff = async (req: Request, res: Response) => {
       });
     }
 
-    const existing = await User.findOne({ where: { email }, transaction });
+    const existing = await User.findOne({
+      where: onlyActiveUserWhere(email),
+      transaction,
+    });
     if (existing) {
       await transaction.rollback();
       return res.status(400).json({
@@ -149,6 +247,8 @@ export const registerStaff = async (req: Request, res: Response) => {
         message: "Email already exists",
       });
     }
+
+    await releaseSoftDeletedUserEmail(email, transaction);
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const accountType = role === "registrar" ? "registrar" : "admin";
@@ -231,6 +331,14 @@ export const registerStaff = async (req: Request, res: Response) => {
       await transaction.rollback();
     }
     console.error("REGISTER STAFF ERROR:", error);
+
+    if (error instanceof DeanCourseAssignmentConflictError) {
+      return res.status(409).json({
+        status: "error",
+        message: error.message,
+      });
+    }
+
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -248,6 +356,8 @@ export const registerStudent = async (req: Request, res: Response) => {
   };
 
   try {
+    await ensureUserSoftDeleteSchema();
+
     const {
       email,
       password,
@@ -274,7 +384,10 @@ export const registerStudent = async (req: Request, res: Response) => {
       year_level,
     });
 
-    const existingUser = await User.findOne({ where: { email } });
+    const existingUser = await User.findOne({
+      where: onlyActiveUserWhere(email),
+      transaction,
+    });
     if (existingUser) {
       await rollbackTransaction();
       return sendSingleFieldValidationError(
@@ -284,9 +397,21 @@ export const registerStudent = async (req: Request, res: Response) => {
       );
     }
 
-    const existingStudent = await StudentProfile.findOne({
-      where: { student_number },
-    });
+    const [existingStudent]: any = await sequelize.query(
+      `
+      SELECT sp.student_id
+      FROM student_profiles sp
+      INNER JOIN users u ON sp.user_id = u.user_id
+      WHERE sp.student_number = :studentNumber
+        AND u.deleted_at IS NULL
+      LIMIT 1
+      `,
+      {
+        replacements: { studentNumber: student_number },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
     if (existingStudent) {
       await rollbackTransaction();
       return sendSingleFieldValidationError(
@@ -295,6 +420,9 @@ export const registerStudent = async (req: Request, res: Response) => {
         "That student number is already linked to an existing account."
       );
     }
+
+    await releaseSoftDeletedUserEmail(email, transaction);
+    await releaseSoftDeletedStudentNumber(student_number, transaction);
 
     const hashedPassword = await bcrypt.hash(password, 10);
 

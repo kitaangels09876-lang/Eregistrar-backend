@@ -3,13 +3,29 @@ import { sequelize, Admin as AdminProfile, User } from "../models";
 import { QueryTypes, UniqueConstraintError } from "sequelize";
 import {
   clearDeanAssignments,
+  DeanCourseAssignmentConflictError,
   listDeanAssignments,
+  listAssignableDeanCourses,
   clearRegistrarAssignments,
   listRegistrarAssignments,
   replaceDeanAssignments,
   replaceRegistrarAssignments,
 } from "../services/auth/staffAssignments.service";
 import { ensureUserSoftDeleteSchema } from "../services/auth/userSoftDelete.service";
+
+const createSoftDeleteUniqueSuffix = () =>
+  `deleted_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const buildSoftDeletedEmail = (email: string, suffix: string) => {
+  const normalizedEmail = String(email || "").trim();
+  const atIndex = normalizedEmail.indexOf("@");
+
+  if (atIndex <= 0) {
+    return `${suffix}_${normalizedEmail || "user"}@deleted.local`;
+  }
+
+  return `${normalizedEmail.slice(0, atIndex)}+${suffix}${normalizedEmail.slice(atIndex)}`;
+};
 
 export const getAllAdminAndRegistrarAccounts = async (
   req: Request,
@@ -30,6 +46,8 @@ export const getAllAdminAndRegistrarAccounts = async (
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const offset = (page - 1) * limit;
+    const requestedRole = String(req.query.role || "").trim().toLowerCase();
+    const roleFilter = staffRoles.includes(requestedRole) ? requestedRole : "";
 
     const countResult: any = await sequelize.query(
       `
@@ -39,6 +57,7 @@ export const getAllAdminAndRegistrarAccounts = async (
       INNER JOIN user_roles ur ON ur.user_id = u.user_id
       INNER JOIN roles r ON r.role_id = ur.role_id
       WHERE r.role_name IN (:staffRoles)
+        AND (:roleFilter = '' OR r.role_name = :roleFilter)
         AND u.deleted_at IS NULL
         AND (
           :search = '' OR
@@ -53,6 +72,7 @@ export const getAllAdminAndRegistrarAccounts = async (
           search,
           likeSearch: `%${search}%`,
           staffRoles,
+          roleFilter,
         },
         type: QueryTypes.SELECT,
       }
@@ -87,6 +107,7 @@ export const getAllAdminAndRegistrarAccounts = async (
         ON r.role_id = ur.role_id
 
       WHERE r.role_name IN (:staffRoles)
+        AND (:roleFilter = '' OR r.role_name = :roleFilter)
         AND u.deleted_at IS NULL
         AND (
           :search = '' OR
@@ -105,6 +126,7 @@ export const getAllAdminAndRegistrarAccounts = async (
           search,
           likeSearch: `%${search}%`,
           staffRoles,
+          roleFilter,
           limit,
           offset,
         },
@@ -240,6 +262,30 @@ export const getAdminOrRegistrarById = async (
     return res.status(500).json({
       status: "error",
       message: "Internal server error"
+    });
+  }
+};
+
+export const getAssignableDeanCourses = async (req: Request, res: Response) => {
+  try {
+    await ensureUserSoftDeleteSchema();
+
+    const requestedUserId = Number(req.query.userId || 0);
+    const currentUserId =
+      Number.isInteger(requestedUserId) && requestedUserId > 0
+        ? requestedUserId
+        : undefined;
+    const courses = await listAssignableDeanCourses(currentUserId);
+
+    return res.status(200).json({
+      status: "success",
+      data: courses,
+    });
+  } catch (error) {
+    console.error("GET ASSIGNABLE DEAN COURSES ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
     });
   }
 };
@@ -532,11 +578,13 @@ export const softDeleteAdminOrRegistrarAccount = async (
 
     const userRows: Array<{
       user_id: number;
+      email: string;
       roles: string | null;
     }> = await sequelize.query(
       `
       SELECT
         u.user_id,
+        u.email,
         GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.role_name SEPARATOR ',') AS roles
       FROM users u
       INNER JOIN user_roles ur ON ur.user_id = u.user_id
@@ -566,11 +614,16 @@ export const softDeleteAdminOrRegistrarAccount = async (
       .split(",")
       .map((role) => role.trim().toLowerCase())
       .filter(Boolean);
+    const softDeletedEmail = buildSoftDeletedEmail(
+      userRows[0].email,
+      createSoftDeleteUniqueSuffix()
+    );
 
     await sequelize.query(
       `
       UPDATE users
       SET
+        email = :email,
         status = 'inactive',
         deleted_at = NOW(),
         updated_at = NOW()
@@ -578,7 +631,10 @@ export const softDeleteAdminOrRegistrarAccount = async (
         AND deleted_at IS NULL
       `,
       {
-        replacements: { userId: targetUserId },
+        replacements: {
+          email: softDeletedEmail,
+          userId: targetUserId,
+        },
         type: QueryTypes.UPDATE,
         transaction,
       }
@@ -866,7 +922,7 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
 
     if (normalizedEmail !== undefined) {
       const duplicateEmailUser = await User.findOne({
-        where: { email: normalizedEmail },
+        where: { email: normalizedEmail, deleted_at: null },
         attributes: ["user_id"],
         transaction,
       });
@@ -1023,6 +1079,19 @@ export const updateAdminAccount = async (req: Request, res: Response) => {
   } catch (error: any) {
     await transaction.rollback();
     console.error("UPDATE ADMIN ACCOUNT ERROR:", error);
+
+    if (error instanceof DeanCourseAssignmentConflictError) {
+      return res.status(409).json({
+        status: "error",
+        message: "Please correct the highlighted fields and try again.",
+        errors: [
+          {
+            field: "dean_course_ids",
+            message: error.message,
+          },
+        ],
+      });
+    }
 
     if (error instanceof UniqueConstraintError || error?.name === "SequelizeUniqueConstraintError") {
       return res.status(409).json({

@@ -18,6 +18,13 @@ const normalizeCourseIds = (courseIds: unknown): number[] => {
   );
 };
 
+export class DeanCourseAssignmentConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DeanCourseAssignmentConflictError";
+  }
+}
+
 const ensureWorkflowAssignmentSchema = async () => {
   if (assignmentSchemaReady) {
     return;
@@ -157,6 +164,60 @@ export const clearDeanAssignments = async (
   );
 };
 
+export const listAssignableDeanCourses = async (currentUserId?: number) => {
+  await ensureWorkflowAssignmentSchema();
+
+  const userId =
+    Number.isInteger(currentUserId) && Number(currentUserId) > 0
+      ? Number(currentUserId)
+      : 0;
+
+  const courses: Array<{
+    course_id: number;
+    course_code: string;
+    course_name: string;
+    course_description: string | null;
+    department: string | null;
+    department_id: number | null;
+    college_id: number | null;
+  }> = await sequelize.query(
+    `
+    SELECT DISTINCT
+      c.course_id,
+      c.course_code,
+      c.course_name,
+      c.course_description,
+      c.department,
+      wcs.department_id,
+      wcs.college_id
+    FROM courses c
+    INNER JOIN workflow_course_scopes wcs ON wcs.course_id = c.course_id
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM workflow_dean_assignments wda
+      INNER JOIN users u ON u.user_id = wda.user_id
+      WHERE wda.is_active = 1
+        AND u.deleted_at IS NULL
+        AND wda.user_id <> :userId
+        AND (
+          wda.course_id = c.course_id
+          OR (
+            wcs.department_id IS NOT NULL
+            AND wda.department_id = wcs.department_id
+          )
+        )
+    )
+    ORDER BY c.course_name ASC
+    `,
+    {
+      replacements: { userId },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return courses;
+};
+
 export const replaceDeanAssignments = async (
   userId: number,
   courseIds: unknown,
@@ -166,9 +227,8 @@ export const replaceDeanAssignments = async (
 
   const normalizedCourseIds = normalizeCourseIds(courseIds);
 
-  await clearDeanAssignments(userId, transaction);
-
   if (normalizedCourseIds.length === 0) {
+    await clearDeanAssignments(userId, transaction);
     return [];
   }
 
@@ -197,6 +257,48 @@ export const replaceDeanAssignments = async (
       "One or more selected dean courses are missing workflow scope assignments"
     );
   }
+
+  const conflicts: Array<{
+    course_code: string;
+    course_name: string;
+  }> = await sequelize.query(
+    `
+    SELECT DISTINCT
+      assigned.course_code,
+      assigned.course_name
+    FROM workflow_dean_assignments wda
+    INNER JOIN users u ON u.user_id = wda.user_id
+    INNER JOIN courses assigned ON assigned.course_id = wda.course_id
+    INNER JOIN workflow_course_scopes selected_scope
+      ON selected_scope.course_id IN (:courseIds)
+    WHERE wda.is_active = 1
+      AND u.deleted_at IS NULL
+      AND wda.user_id <> :userId
+      AND (
+        wda.course_id = selected_scope.course_id
+        OR (
+          selected_scope.department_id IS NOT NULL
+          AND wda.department_id = selected_scope.department_id
+        )
+      )
+    LIMIT 1
+    `,
+    {
+      replacements: { courseIds: normalizedCourseIds, userId },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  if (conflicts.length > 0) {
+    const conflict = conflicts[0];
+
+    throw new DeanCourseAssignmentConflictError(
+      `${conflict.course_code} - ${conflict.course_name} is already assigned to another dean.`
+    );
+  }
+
+  await clearDeanAssignments(userId, transaction);
 
   for (const scope of scopes) {
     await sequelize.query(

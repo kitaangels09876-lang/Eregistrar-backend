@@ -10,9 +10,26 @@ import {
   sendSingleFieldValidationError,
   sendValidationError,
 } from "../utils/validationResponse";
+import { ensureUserSoftDeleteSchema } from "../services/auth/userSoftDelete.service";
+
+const createSoftDeleteUniqueSuffix = () =>
+  `deleted_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const buildSoftDeletedEmail = (email: string, suffix: string) => {
+  const normalizedEmail = String(email || "").trim();
+  const atIndex = normalizedEmail.indexOf("@");
+
+  if (atIndex <= 0) {
+    return `${suffix}_${normalizedEmail || "student"}@deleted.local`;
+  }
+
+  return `${normalizedEmail.slice(0, atIndex)}+${suffix}${normalizedEmail.slice(atIndex)}`;
+};
 
 export const getAllStudents = async (req: Request, res: Response) => {
   try {
+    await ensureUserSoftDeleteSchema();
+
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
@@ -21,7 +38,7 @@ export const getAllStudents = async (req: Request, res: Response) => {
     const status = req.query.status as string; 
     const enrollmentStatus = req.query.enrollment_status as string;
 
-    let whereClause = `WHERE u.account_type = 'student'`;
+    let whereClause = `WHERE u.account_type = 'student' AND u.deleted_at IS NULL`;
     const replacements: any = { limit, offset };
 
     if (search) {
@@ -155,6 +172,7 @@ export const getStudentById = async (req: Request, res: Response) => {
       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
       LEFT JOIN roles r ON ur.role_id = r.role_id
       WHERE sp.student_id = :studentId
+        AND u.deleted_at IS NULL
       GROUP BY sp.student_id
       `,
       {
@@ -510,7 +528,9 @@ export const updateStudent = async (req: Request, res: Response) => {
       `
       SELECT sp.student_id, sp.user_id
       FROM student_profiles sp
+      INNER JOIN users u ON sp.user_id = u.user_id
       WHERE sp.student_id = :studentId
+        AND u.deleted_at IS NULL
       LIMIT 1
       `,
       {
@@ -530,7 +550,7 @@ export const updateStudent = async (req: Request, res: Response) => {
 
     if (normalizedEmail !== undefined) {
       const duplicateEmailUser = await User.findOne({
-        where: { email: normalizedEmail },
+        where: { email: normalizedEmail, deleted_at: null },
         attributes: ["user_id"],
         transaction,
       });
@@ -551,11 +571,21 @@ export const updateStudent = async (req: Request, res: Response) => {
     }
 
     if (normalizedStudentNumber !== undefined) {
-      const duplicateStudent = await StudentProfile.findOne({
-        where: { student_number: normalizedStudentNumber },
-        attributes: ["student_id"],
-        transaction,
-      });
+      const [duplicateStudent]: any = await sequelize.query(
+        `
+        SELECT sp.student_id
+        FROM student_profiles sp
+        INNER JOIN users u ON sp.user_id = u.user_id
+        WHERE sp.student_number = :studentNumber
+          AND u.deleted_at IS NULL
+        LIMIT 1
+        `,
+        {
+          replacements: { studentNumber: normalizedStudentNumber },
+          type: QueryTypes.SELECT,
+          transaction,
+        }
+      );
 
       if (
         duplicateStudent &&
@@ -749,6 +779,7 @@ export const updateStudentStatus = async (req: Request, res: Response) => {
       FROM student_profiles sp
       INNER JOIN users u ON sp.user_id = u.user_id
       WHERE sp.student_id = :studentId
+        AND u.deleted_at IS NULL
       `,
       {
         replacements: { studentId: normalizedStudentId },
@@ -796,6 +827,128 @@ export const updateStudentStatus = async (req: Request, res: Response) => {
   }
 };
 
+export const softDeleteStudent = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    await ensureUserSoftDeleteSchema();
+
+    const normalizedStudentId = Number(req.params.studentId);
+
+    if (!Number.isInteger(normalizedStudentId) || normalizedStudentId <= 0) {
+      await transaction.rollback();
+      return sendSingleFieldValidationError(
+        res,
+        "studentId",
+        "We could not identify which student to delete. Refresh the page and try again."
+      );
+    }
+
+    const studentRows: Array<{
+      student_id: number;
+      user_id: number;
+      email: string;
+    }> = await sequelize.query(
+      `
+      SELECT sp.student_id, u.user_id, u.email
+      FROM student_profiles sp
+      INNER JOIN users u ON sp.user_id = u.user_id
+      WHERE sp.student_id = :studentId
+        AND u.account_type = 'student'
+        AND u.deleted_at IS NULL
+      LIMIT 1
+      `,
+      {
+        replacements: { studentId: normalizedStudentId },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    if (studentRows.length === 0) {
+      await transaction.rollback();
+      return res.status(404).json({
+        status: "error",
+        message: "Student not found or already deleted",
+      });
+    }
+
+    const targetUserId = studentRows[0].user_id;
+    const uniqueSuffix = createSoftDeleteUniqueSuffix();
+    const softDeletedEmail = buildSoftDeletedEmail(studentRows[0].email, uniqueSuffix);
+
+    await sequelize.query(
+      `
+      UPDATE users
+      SET
+        email = :email,
+        status = 'inactive',
+        deleted_at = NOW(),
+        updated_at = NOW()
+      WHERE user_id = :userId
+        AND deleted_at IS NULL
+      `,
+      {
+        replacements: {
+          email: softDeletedEmail,
+          userId: targetUserId,
+        },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await sequelize.query(
+      `
+      UPDATE student_profiles
+      SET
+        student_number = :studentNumber,
+        updated_at = NOW()
+      WHERE student_id = :studentId
+      `,
+      {
+        replacements: {
+          studentNumber: `${studentRows[0].student_id}-${uniqueSuffix}`,
+          studentId: normalizedStudentId,
+        },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await sequelize.query(
+      `
+      UPDATE refresh_tokens
+      SET revoked_at = NOW()
+      WHERE user_id = :userId
+        AND revoked_at IS NULL
+      `,
+      {
+        replacements: { userId: targetUserId },
+        type: QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Student account soft deleted successfully",
+      data: {
+        student_id: normalizedStudentId,
+      },
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error("SOFT DELETE STUDENT ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to soft delete student account",
+    });
+  }
+};
+
 export const validateEmailAvailability = async (
   req: Request,
   res: Response
@@ -821,7 +974,7 @@ export const validateEmailAvailability = async (
     }
 
     const user = await User.findOne({
-      where: { email },
+      where: { email, deleted_at: null },
       attributes: ["status"],
     });
 

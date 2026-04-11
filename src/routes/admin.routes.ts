@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllAdminAndRegistrarAccounts,getAdminOrRegistrarById , changeAdminOrRegistrarRole,changeAdminOrRegistrarStatus, softDeleteAdminOrRegistrarAccount, updateAdminAccount} from "../controllers/admin.controller";
+import { getAllAdminAndRegistrarAccounts,getAdminOrRegistrarById , changeAdminOrRegistrarRole,changeAdminOrRegistrarStatus, getAssignableDeanCourses, softDeleteAdminOrRegistrarAccount, updateAdminAccount} from "../controllers/admin.controller";
 import { authenticateToken, requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -9,6 +9,13 @@ router.get(
   authenticateToken,
   requireRole("admin"), 
   getAllAdminAndRegistrarAccounts
+);
+
+router.get(
+  "/admins/dean-assignable-courses",
+  authenticateToken,
+  requireRole("admin"),
+  getAssignableDeanCourses
 );
 
 router.get(

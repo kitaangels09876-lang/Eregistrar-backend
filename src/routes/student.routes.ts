@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllStudents,getStudentById,updateStudent,updateStudentStatus, validateEmailAvailability,updateStudentAcademicStatus  } from "../controllers/student.controller";
+import { getAllStudents,getStudentById,updateStudent,updateStudentStatus, validateEmailAvailability,updateStudentAcademicStatus, softDeleteStudent  } from "../controllers/student.controller";
 import { authenticateToken, requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -39,6 +39,12 @@ router.patch(
   updateStudentAcademicStatus
 );
 
+router.delete(
+  "/students/:studentId",
+  authenticateToken,
+  requireRole("admin", "registrar"),
+  softDeleteStudent
+);
 
 router.post("/validate-email", validateEmailAvailability);
 
