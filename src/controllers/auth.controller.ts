@@ -1195,7 +1195,7 @@ export const testSmtpConnection = async (req: Request, res: Response) => {
 This is a test email from eRegistrar.
 
 Sent at: ${new Date().toISOString()}
-Provider: ${mailSummary.provider}
+Transport: ${mailSummary.transport}
 From address: ${mailSummary.from || "not configured"}
 `,
       html: `
@@ -1204,7 +1204,7 @@ From address: ${mailSummary.from || "not configured"}
           <p style="margin-bottom: 16px;">Hello,</p>
           <p style="margin-bottom: 16px;">This is a test email from eRegistrar.</p>
           <p style="margin-bottom: 8px;"><strong>Sent at:</strong> ${new Date().toISOString()}</p>
-          <p style="margin-bottom: 8px;"><strong>Provider:</strong> ${mailSummary.provider}</p>
+          <p style="margin-bottom: 8px;"><strong>Transport:</strong> ${mailSummary.transport}</p>
           <p style="margin-bottom: 8px;"><strong>From address:</strong> ${mailSummary.from || "not configured"}</p>
         </div>
       `,
