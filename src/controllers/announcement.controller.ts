@@ -1,10 +1,64 @@
 import { Request, Response } from "express";
-import { Announcement } from "../models";
-import { Op } from "sequelize";
+import { Announcement, sequelize } from "../models";
+import { Op, QueryTypes } from "sequelize";
 import { logActivity, getUserIdFromRequest } from "../utils/auditlog.service";
 
 const getSingleParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
+
+const listAnnouncementCreatorNames = async (userIds: number[]) => {
+  const normalizedUserIds = Array.from(
+    new Set(
+      userIds
+        .map((userId) => Number(userId))
+        .filter((userId) => Number.isInteger(userId) && userId > 0)
+    )
+  );
+
+  if (normalizedUserIds.length === 0) {
+    return new Map<number, string>();
+  }
+
+  const rows: Array<{
+    user_id: number;
+    display_name: string | null;
+    email: string | null;
+  }> = await sequelize.query(
+    `
+    SELECT
+      u.user_id,
+      COALESCE(
+        NULLIF(
+          TRIM(
+            CASE
+              WHEN LOWER(COALESCE(u.account_type, '')) IN ('student', 'alumni')
+                THEN CONCAT_WS(' ', sp.first_name, sp.middle_name, sp.last_name)
+              ELSE CONCAT_WS(' ', ap.first_name, ap.middle_name, ap.last_name)
+            END
+          ),
+          ''
+        ),
+        u.email
+      ) AS display_name,
+      u.email
+    FROM users u
+    LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+    LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+    WHERE u.user_id IN (:userIds)
+    `,
+    {
+      replacements: { userIds: normalizedUserIds },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return new Map(
+    rows.map((row) => [
+      Number(row.user_id),
+      String(row.display_name || row.email || "").trim(),
+    ])
+  );
+};
 
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
@@ -26,7 +80,11 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       });
     }
 
-    const postedBy = "System Administrator";
+    const creatorNames = await listAnnouncementCreatorNames([userId]);
+    const postedBy =
+      creatorNames.get(userId) ||
+      req.user?.email ||
+      "System Administrator";
 
     const announcement = await Announcement.create({
       title,
@@ -84,6 +142,19 @@ export const getAllAnnouncements = async (req: Request, res: Response) => {
       offset
     });
 
+    const creatorNames = await listAnnouncementCreatorNames(
+      rows.map((announcement) => announcement.created_by)
+    );
+    const data = rows.map((announcement) => {
+      const item = announcement.get({ plain: true });
+
+      return {
+        ...item,
+        posted_by:
+          creatorNames.get(Number(item.created_by)) ||
+          item.posted_by,
+      };
+    });
     const totalPages = Math.ceil(count / limit);
 
     res.json({
@@ -94,7 +165,7 @@ export const getAllAnnouncements = async (req: Request, res: Response) => {
         currentPage: page,
         limit
       },
-      data: rows
+      data
     });
   } catch (error) {
     console.error("GET ALL ANNOUNCEMENTS ERROR:", error);
