@@ -2593,18 +2593,34 @@ const getRequestDetailInternal = async (workflowRequestId: number) => {
   const actions: any[] = await sequelize.query(
     `
     SELECT
-      workflow_request_action_id,
-      action_role,
-      action_type,
-      from_status,
-      to_status,
-      remarks,
-      payload_json,
-      acted_by_user_id,
-      acted_at
-    FROM workflow_request_actions
-    WHERE workflow_request_id = :workflowRequestId
-    ORDER BY acted_at ASC, workflow_request_action_id ASC
+      wra.workflow_request_action_id,
+      wra.action_role,
+      wra.action_type,
+      wra.from_status,
+      wra.to_status,
+      wra.remarks,
+      wra.payload_json,
+      wra.acted_by_user_id,
+      wra.acted_at,
+      COALESCE(
+        NULLIF(
+          CASE
+            WHEN LOWER(COALESCE(u.account_type, '')) IN ('student', 'alumni')
+              THEN CONCAT_WS(' ', sp.first_name, sp.middle_name, sp.last_name, sp.extension_name)
+            ELSE CONCAT_WS(' ', ap.first_name, ap.middle_name, ap.last_name)
+          END,
+          ''
+        ),
+        u.email,
+        CONCAT('User #', wra.acted_by_user_id)
+      ) AS actor_name,
+      LOWER(COALESCE(u.account_type, '')) AS actor_account_type
+    FROM workflow_request_actions wra
+    LEFT JOIN users u ON u.user_id = wra.acted_by_user_id
+    LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+    LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+    WHERE wra.workflow_request_id = :workflowRequestId
+    ORDER BY wra.acted_at ASC, wra.workflow_request_action_id ASC
     `,
     {
       replacements: { workflowRequestId },
