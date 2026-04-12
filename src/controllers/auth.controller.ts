@@ -17,11 +17,18 @@ import { getPermissionsForRoles } from "../services/auth/permission.service";
     sendEmailVerificationEmail,
     verifyEmailVerificationToken,
   } from "../services/emailVerification.service";
-  import {
-    getMailDebugSummary,
-    getMailErrorDebugDetails,
-    sendEmail,
-  } from "../services/mail.service";
+import {
+  getMailDebugSummary,
+  getMailErrorDebugDetails,
+  sendEmail,
+} from "../services/mail.service";
+import {
+  buildPasswordResetUrl,
+  decodePasswordResetToken,
+  generatePasswordResetToken,
+  sendPasswordResetEmail,
+  verifyPasswordResetToken,
+} from "../services/passwordReset.service";
 import {
   sendSingleFieldValidationError,
   sendValidationError,
@@ -60,6 +67,51 @@ const getVerificationUrlForUser = (userId: number, email: string): string =>
       email,
     })
   );
+
+const getPasswordResetUrlForUser = (user: { user_id: number; email: string; password: string }): string =>
+  buildPasswordResetUrl(
+    generatePasswordResetToken({
+      userId: user.user_id,
+      email: user.email,
+      passwordHash: user.password,
+    })
+  );
+
+const getUserDisplayName = async (user: {
+  user_id: number;
+  email: string;
+  account_type: string;
+}) => {
+  const [row]: Array<{ display_name: string | null }> = await sequelize.query(
+    `
+    SELECT
+      COALESCE(
+        NULLIF(
+          TRIM(
+            CASE
+              WHEN LOWER(COALESCE(u.account_type, '')) IN ('student', 'alumni')
+                THEN CONCAT_WS(' ', sp.first_name, sp.last_name)
+              ELSE CONCAT_WS(' ', ap.first_name, ap.last_name)
+            END
+          ),
+          ''
+        ),
+        u.email
+      ) AS display_name
+    FROM users u
+    LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+    LEFT JOIN admin_profiles ap ON ap.user_id = u.user_id
+    WHERE u.user_id = :userId
+    LIMIT 1
+    `,
+    {
+      replacements: { userId: user.user_id },
+      type: QueryTypes.SELECT,
+    }
+  );
+
+  return row?.display_name || user.email;
+};
 
 const createAuthTraceId = () =>
   `auth_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -627,6 +679,185 @@ export const registerStudent = async (req: Request, res: Response) => {
         error?.message?.includes("verification")
           ? "Failed to send verification email"
           : "Internal server error",
+    });
+  }
+};
+
+export const requestPasswordReset = async (req: Request, res: Response) => {
+  try {
+    await ensureUserSoftDeleteSchema();
+
+    const email =
+      typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+
+    if (!email) {
+      return res.status(400).json({
+        status: "error",
+        message: "Email is required",
+      });
+    }
+
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid email format",
+      });
+    }
+
+    const genericMessage =
+      "If an account uses that email, a password reset link has been sent.";
+
+    const user = await User.findOne({
+      where: {
+        email,
+        deleted_at: null,
+      },
+    });
+
+    if (!user) {
+      return res.status(200).json({
+        status: "success",
+        message: genericMessage,
+      });
+    }
+
+    const displayName = await getUserDisplayName(user);
+    const resetUrl = getPasswordResetUrlForUser(user);
+
+    try {
+      await sendPasswordResetEmail({
+        userId: user.user_id,
+        email: user.email,
+        passwordHash: user.password,
+        displayName,
+      });
+    } catch (mailError) {
+      const emailErrorMessage = getErrorMessage(mailError);
+
+      console.error(
+        "PASSWORD RESET EMAIL DELIVERY ERROR:",
+        getMailErrorDebugDetails(mailError)
+      );
+
+      if (!isProductionEnvironment()) {
+        return res.status(200).json({
+          status: "success",
+          message:
+            "Password reset email could not be sent. Use the reset URL below in development or retry once the mail service is available.",
+          warning: "Password reset email delivery failed.",
+          reset_url: resetUrl,
+          email_error: emailErrorMessage,
+        });
+      }
+
+      return res.status(503).json({
+        status: "error",
+        message: "Failed to send password reset email",
+      });
+    }
+
+    await logActivity({
+      userId: user.user_id,
+      action: "REQUEST_PASSWORD_RESET",
+      tableName: "users",
+      recordId: user.user_id,
+      req,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: genericMessage,
+    });
+  } catch (error) {
+    console.error("REQUEST PASSWORD RESET ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to request password reset",
+    });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    await ensureUserSoftDeleteSchema();
+
+    const token =
+      typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    const password =
+      typeof req.body?.password === "string" ? req.body.password : "";
+
+    if (!token) {
+      return res.status(400).json({
+        status: "error",
+        message: "Reset token is required",
+      });
+    }
+
+    if (!password) {
+      return res.status(400).json({
+        status: "error",
+        message: "New password is required",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        status: "error",
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Password must include at least 1 letter and 1 number",
+      });
+    }
+
+    const decoded = decodePasswordResetToken(token);
+    const user = await User.findOne({
+      where: {
+        user_id: decoded.user_id,
+        email: decoded.email,
+        deleted_at: null,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        status: "error",
+        message: "Password reset link is invalid or expired",
+      });
+    }
+
+    verifyPasswordResetToken({
+      token,
+      passwordHash: user.password,
+    });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await user.update({ password: hashedPassword });
+
+    await logActivity({
+      userId: user.user_id,
+      action: "RESET_PASSWORD",
+      tableName: "users",
+      recordId: user.user_id,
+      req,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Password reset successfully. You can now log in.",
+    });
+  } catch (error: any) {
+    const isExpiredToken = error?.name === "TokenExpiredError";
+
+    return res.status(400).json({
+      status: "error",
+      message: isExpiredToken
+        ? "Password reset link has expired"
+        : "Password reset link is invalid or expired",
     });
   }
 };

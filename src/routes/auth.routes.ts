@@ -6,6 +6,8 @@ import {
   checkAuth,
   refreshAccessToken,
   registerStudent,
+  requestPasswordReset,
+  resetPassword,
   testMailConnection,
   verifyEmail,
   resendVerificationEmail
@@ -32,6 +34,10 @@ router.post(
   validateLogin,
   login
 );
+
+router.post("/forgot-password", requestPasswordReset);
+
+router.post("/reset-password", resetPassword);
 
 router.post("/refresh", refreshAccessToken);
 

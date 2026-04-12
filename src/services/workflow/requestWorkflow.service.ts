@@ -151,10 +151,17 @@ const parseJsonField = <T>(value: any, fallback: T): T => {
 
 const resolveWorkflowFinalFee = (
   feeSnapshot: Record<string, any>,
-  items: Array<{ final_price?: number | string | null; base_price?: number | string | null }>
+  items: Array<{
+    final_price?: number | string | null;
+    base_price?: number | string | null;
+    item_status?: string | null;
+  }>
 ) => {
   const fallbackItemTotal = items.reduce(
-    (sum, item) => sum + Number(item.final_price ?? item.base_price ?? 0),
+    (sum, item) =>
+      String(item.item_status || "").toUpperCase() === "REJECTED"
+        ? sum
+        : sum + Number(item.final_price ?? item.base_price ?? 0),
     0
   );
 
@@ -767,7 +774,16 @@ const promoteCollegeAdminApprovedRequests = async (
       wr.fee_snapshot_json,
       wr.payment_snapshot_json,
       wr.approval_snapshot_json,
-      COALESCE(SUM(COALESCE(wri.final_price, wri.base_price, 0)), 0) AS default_fee
+      COALESCE(
+        SUM(
+          CASE
+            WHEN COALESCE(wri.item_status, 'SUBMITTED') = 'REJECTED'
+              THEN 0
+            ELSE COALESCE(wri.final_price, wri.base_price, 0)
+          END
+        ),
+        0
+      ) AS default_fee
     FROM workflow_requests wr
     LEFT JOIN workflow_request_items wri ON wri.workflow_request_id = wr.workflow_request_id
     WHERE wr.current_status = 'COLLEGE_ADMIN_APPROVED'
@@ -1778,6 +1794,10 @@ const ensureWorkflowSchema = async () => {
       quantity INT NOT NULL DEFAULT 1,
       base_price DECIMAL(10,2) NOT NULL DEFAULT 0,
       final_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+      item_status VARCHAR(64) NOT NULL DEFAULT 'SUBMITTED',
+      rejection_reason TEXT NULL,
+      rejected_by_role VARCHAR(100) NULL,
+      rejected_at DATETIME NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (workflow_request_id) REFERENCES workflow_requests(workflow_request_id) ON DELETE CASCADE,
       FOREIGN KEY (document_type_id) REFERENCES document_types(document_type_id)
@@ -1957,6 +1977,26 @@ const ensureWorkflowSchema = async () => {
   await ensureColumnExists("workflow_requests", "cancellation_reason", "TEXT NULL");
   await ensureColumnExists("workflow_requests", "cancelled_by_role", "VARCHAR(100) NULL");
   await ensureColumnExists("workflow_requests", "cancelled_at", "DATETIME NULL");
+  await ensureColumnExists(
+    "workflow_request_items",
+    "item_status",
+    "VARCHAR(64) NOT NULL DEFAULT 'SUBMITTED'"
+  );
+  await ensureColumnExists(
+    "workflow_request_items",
+    "rejection_reason",
+    "TEXT NULL"
+  );
+  await ensureColumnExists(
+    "workflow_request_items",
+    "rejected_by_role",
+    "VARCHAR(100) NULL"
+  );
+  await ensureColumnExists(
+    "workflow_request_items",
+    "rejected_at",
+    "DATETIME NULL"
+  );
 
   await ensureColumnExists(
     "workflow_release_records",
@@ -2535,7 +2575,11 @@ const getRequestDetailInternal = async (workflowRequestId: number) => {
       document_name,
       quantity,
       base_price,
-      final_price
+      final_price,
+      item_status,
+      rejection_reason,
+      rejected_by_role,
+      rejected_at
     FROM workflow_request_items
     WHERE workflow_request_id = :workflowRequestId
     ORDER BY workflow_request_item_id ASC
@@ -3131,14 +3175,16 @@ export const createWorkflowRequest = async (user: AuthUser, payload: WorkflowReq
           document_name,
           quantity,
           base_price,
-          final_price
+          final_price,
+          item_status
         ) VALUES (
           :workflowRequestId,
           :documentTypeId,
           :documentName,
           1,
           :basePrice,
-          :finalPrice
+          :finalPrice,
+          'SUBMITTED'
         )
         `,
         {
@@ -3565,12 +3611,17 @@ export const listWorkflowRequests = async (
     ? await sequelize.query(
         `
         SELECT
+          workflow_request_item_id,
           workflow_request_id,
           document_type_id,
           document_name,
           quantity,
           base_price,
-          final_price
+          final_price,
+          item_status,
+          rejection_reason,
+          rejected_by_role,
+          rejected_at
         FROM workflow_request_items
         WHERE workflow_request_id IN (:requestIds)
         ORDER BY workflow_request_id ASC, workflow_request_item_id ASC
@@ -3588,11 +3639,16 @@ export const listWorkflowRequests = async (
       acc[key] = [];
     }
       acc[key].push({
+        workflow_request_item_id: item.workflow_request_item_id,
         document_type_id: item.document_type_id,
         document_name: item.document_name,
         quantity: item.quantity,
         base_price: item.base_price,
         final_price: item.final_price,
+        item_status: item.item_status,
+        rejection_reason: item.rejection_reason,
+        rejected_by_role: item.rejected_by_role,
+        rejected_at: item.rejected_at,
       });
       return acc;
   }, {});
@@ -3785,7 +3841,10 @@ export const advanceWorkflowRequest = async (
 
   if (body.target_status === "FEE_ASSESSED") {
     const defaultAssessedFee = detail.items.reduce(
-      (sum: number, item: any) => sum + Number(item.final_price ?? item.base_price ?? 0),
+      (sum: number, item: any) =>
+        String(item.item_status || "").toUpperCase() === "REJECTED"
+          ? sum
+          : sum + Number(item.final_price ?? item.base_price ?? 0),
       0
     );
     feeSnapshot.assessed_by_role = getPrimaryRole(user);
@@ -3802,7 +3861,10 @@ export const advanceWorkflowRequest = async (
 
   if (body.target_status === "AWAITING_PAYMENT") {
     const defaultAssessedFee = detail.items.reduce(
-      (sum: number, item: any) => sum + Number(item.final_price ?? item.base_price ?? 0),
+      (sum: number, item: any) =>
+        String(item.item_status || "").toUpperCase() === "REJECTED"
+          ? sum
+          : sum + Number(item.final_price ?? item.base_price ?? 0),
       0
     );
 
@@ -3989,6 +4051,61 @@ export const advanceWorkflowRequest = async (
         type: QueryTypes.UPDATE,
       }
     );
+
+    if (body.target_status === "REJECTED") {
+      await sequelize.query(
+        `
+        UPDATE workflow_request_items
+        SET
+          item_status = 'REJECTED',
+          rejection_reason = COALESCE(rejection_reason, :remarks),
+          rejected_by_role = COALESCE(rejected_by_role, :actedByRole),
+          rejected_at = COALESCE(rejected_at, NOW())
+        WHERE workflow_request_id = :workflowRequestId
+          AND COALESCE(item_status, 'SUBMITTED') <> 'REJECTED'
+        `,
+        {
+          replacements: {
+            workflowRequestId,
+            remarks,
+            actedByRole: getPrimaryRole(user),
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+    } else if (body.target_status === "CANCELLED") {
+      await sequelize.query(
+        `
+        UPDATE workflow_request_items
+        SET item_status = 'CANCELLED'
+        WHERE workflow_request_id = :workflowRequestId
+          AND COALESCE(item_status, 'SUBMITTED') <> 'REJECTED'
+        `,
+        {
+          replacements: { workflowRequestId },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+    } else {
+      await sequelize.query(
+        `
+        UPDATE workflow_request_items
+        SET item_status = :targetStatus
+        WHERE workflow_request_id = :workflowRequestId
+          AND COALESCE(item_status, 'SUBMITTED') NOT IN ('REJECTED', 'CANCELLED')
+        `,
+        {
+          replacements: {
+            workflowRequestId,
+            targetStatus: body.target_status,
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+    }
 
     if (body.target_status === "FEE_ASSESSED" && Array.isArray(updates.item_fees)) {
       for (const item of updates.item_fees) {
@@ -5132,6 +5249,143 @@ export const processWorkflowAction = async (
   }
 
   if (action === "registrar_reject" || action === "dean_reject" || action === "college_admin_reject") {
+    const requestedRejectedItemIds = Array.isArray(input.updates?.rejected_item_ids)
+      ? Array.from(
+          new Set(
+            input.updates.rejected_item_ids
+              .map((itemId: unknown) => Number(itemId))
+              .filter((itemId: number) => Number.isInteger(itemId) && itemId > 0)
+          )
+        )
+      : [];
+
+    const activeItems = (detail.items || []).filter(
+      (item: any) =>
+        !["REJECTED", "CANCELLED"].includes(
+          String(item.item_status || "").toUpperCase()
+        )
+    );
+    const activeItemIds = new Set(
+      activeItems.map((item: any) => Number(item.workflow_request_item_id))
+    );
+    const invalidItemIds = requestedRejectedItemIds.filter(
+      (itemId) => !activeItemIds.has(itemId)
+    );
+
+    if (invalidItemIds.length > 0) {
+      throw new Error("One or more selected documents cannot be rejected");
+    }
+
+    if (
+      requestedRejectedItemIds.length > 0 &&
+      requestedRejectedItemIds.length < activeItems.length
+    ) {
+      const rejectionReason = input.remarks?.trim();
+
+      if (!rejectionReason) {
+        throw new Error("Rejection reason is required");
+      }
+
+      const rejectedDocuments = activeItems
+        .filter((item: any) =>
+          requestedRejectedItemIds.includes(Number(item.workflow_request_item_id))
+        )
+        .map((item: any) => item.document_name)
+        .join(", ");
+
+      await sequelize.transaction(async (transaction) => {
+        await sequelize.query(
+          `
+          UPDATE workflow_request_items
+          SET
+            item_status = 'REJECTED',
+            rejection_reason = :rejectionReason,
+            rejected_by_role = :rejectedByRole,
+            rejected_at = NOW()
+          WHERE workflow_request_id = :workflowRequestId
+            AND workflow_request_item_id IN (:itemIds)
+          `,
+          {
+            replacements: {
+              workflowRequestId,
+              itemIds: requestedRejectedItemIds,
+              rejectionReason,
+              rejectedByRole: getPrimaryRole(user),
+            },
+            transaction,
+            type: QueryTypes.UPDATE,
+          }
+        );
+
+        await sequelize.query(
+          `
+          INSERT INTO workflow_request_actions (
+            workflow_request_id,
+            action_role,
+            action_type,
+            from_status,
+            to_status,
+            remarks,
+            payload_json,
+            acted_by_user_id,
+            acted_at
+          ) VALUES (
+            :workflowRequestId,
+            :actionRole,
+            'ITEM_REJECTION',
+            :fromStatus,
+            :toStatus,
+            :remarks,
+            :payload,
+            :actedByUserId,
+            NOW()
+          )
+          `,
+          {
+            replacements: {
+              workflowRequestId,
+              actionRole: getPrimaryRole(user),
+              fromStatus: currentStatus,
+              toStatus: currentStatus,
+              remarks: rejectionReason,
+              payload: JSON.stringify({
+                ...(input.updates || {}),
+                rejected_item_ids: requestedRejectedItemIds,
+                rejected_documents: rejectedDocuments,
+              }),
+              actedByUserId: user.user_id,
+            },
+            transaction,
+            type: QueryTypes.INSERT,
+          }
+        );
+      });
+
+      await createWorkflowAuditLog({
+        userId: user.user_id,
+        action: "WORKFLOW_ITEM_REJECTED",
+        workflowRequestId,
+        oldValue: {
+          current_status: currentStatus,
+          rejected_item_ids: [],
+        },
+        newValue: {
+          current_status: currentStatus,
+          rejected_item_ids: requestedRejectedItemIds,
+          rejected_documents: rejectedDocuments,
+        },
+      });
+
+      await createWorkflowNotification({
+        userId: detail.student_user_id,
+        title: "Document rejected",
+        message: `For request ${detail.request_reference}, these document(s) were rejected: ${rejectedDocuments}. Reason: ${rejectionReason}`,
+        status: currentStatus,
+      });
+
+      return getWorkflowRequestDetail(workflowRequestId, user);
+    }
+
     return advanceWorkflowRequest(workflowRequestId, user, {
       target_status: "REJECTED",
       remarks: input.remarks,
