@@ -27,6 +27,7 @@ import {
   listWorkflowQueueHandler,
   listWorkflowRequestsHandler,
   paymentConfirmHandler,
+  paymentRejectHandler,
   paymentSubmitHandler,
   registrarRejectHandler,
   registrarVerificationHandler,
@@ -110,6 +111,7 @@ router.post(
   uploadWorkflowApprovalSignature,
   paymentConfirmHandler
 );
+router.post("/v1/payments/:requestId/reject", paymentRejectHandler);
 
 router.post("/v1/documents/:requestId/prepare", documentPrepareHandler);
 router.post("/v1/documents/:requestId/finalize", documentFinalizeHandler);

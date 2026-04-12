@@ -1571,7 +1571,12 @@ const WORKFLOW_ACTION_RULES: Record<
   payment_confirm: {
     roles: ["treasurer"],
     permissions: ["payment.confirm"],
-    currentStatuses: ["AWAITING_PAYMENT", "PAYMENT_SUBMITTED"],
+    currentStatuses: ["PAYMENT_SUBMITTED"],
+  },
+  payment_reject: {
+    roles: ["treasurer"],
+    permissions: ["payment.confirm"],
+    currentStatuses: ["PAYMENT_SUBMITTED"],
   },
   document_prepare: {
     roles: ["registrar"],
@@ -3564,6 +3569,7 @@ export const listWorkflowRequests = async (
           document_type_id,
           document_name,
           quantity,
+          base_price,
           final_price
         FROM workflow_request_items
         WHERE workflow_request_id IN (:requestIds)
@@ -3581,13 +3587,14 @@ export const listWorkflowRequests = async (
     if (!acc[key]) {
       acc[key] = [];
     }
-    acc[key].push({
-      document_type_id: item.document_type_id,
-      document_name: item.document_name,
-      quantity: item.quantity,
-      final_price: item.final_price,
-    });
-    return acc;
+      acc[key].push({
+        document_type_id: item.document_type_id,
+        document_name: item.document_name,
+        quantity: item.quantity,
+        base_price: item.base_price,
+        final_price: item.final_price,
+      });
+      return acc;
   }, {});
 
   const items = rows.map((row) => {
@@ -4919,6 +4926,120 @@ export const processWorkflowAction = async (
       remarks: input.remarks,
       updates: input.updates,
     });
+  }
+
+  if (action === "payment_reject") {
+    const rejectionReason = input.remarks?.trim();
+
+    if (!rejectionReason) {
+      throw new Error("Payment rejection reason is required");
+    }
+
+    const approvalSnapshot = { ...detail.approval_snapshot };
+    const paymentSnapshot = { ...detail.payment_snapshot };
+
+    approvalSnapshot.treasurer_status = "PAYMENT REJECTED";
+    paymentSnapshot.payment_status = "REJECTED";
+    paymentSnapshot.rejected_at = new Date().toISOString();
+    paymentSnapshot.rejected_by_name =
+      input.updates?.rejected_by_name ||
+      paymentSnapshot.rejected_by_name ||
+      "Treasurer";
+    paymentSnapshot.rejection_notes = rejectionReason;
+
+    await sequelize.transaction(async (transaction) => {
+      await sequelize.query(
+        `
+        UPDATE workflow_requests
+        SET
+          current_status = 'AWAITING_PAYMENT',
+          approval_snapshot_json = :approvalSnapshot,
+          payment_snapshot_json = :paymentSnapshot
+        WHERE workflow_request_id = :workflowRequestId
+        `,
+        {
+          replacements: {
+            workflowRequestId,
+            approvalSnapshot: JSON.stringify(approvalSnapshot),
+            paymentSnapshot: JSON.stringify(paymentSnapshot),
+          },
+          transaction,
+          type: QueryTypes.UPDATE,
+        }
+      );
+
+      await sequelize.query(
+        `
+        INSERT INTO workflow_request_actions (
+          workflow_request_id,
+          action_role,
+          action_type,
+          from_status,
+          to_status,
+          remarks,
+          payload_json,
+          acted_by_user_id,
+          acted_at
+        ) VALUES (
+          :workflowRequestId,
+          :actionRole,
+          'PAYMENT_REJECTED',
+          :fromStatus,
+          'AWAITING_PAYMENT',
+          :remarks,
+          :payload,
+          :actedByUserId,
+          NOW()
+        )
+        `,
+        {
+          replacements: {
+            workflowRequestId,
+            actionRole: getPrimaryRole(user),
+            fromStatus: currentStatus,
+            remarks: rejectionReason,
+            payload: JSON.stringify(input.updates || {}),
+            actedByUserId: user.user_id,
+          },
+          transaction,
+          type: QueryTypes.INSERT,
+        }
+      );
+    });
+
+    await createWorkflowAuditLog({
+      userId: user.user_id,
+      action: "WORKFLOW_PAYMENT_REJECTED",
+      workflowRequestId,
+      oldValue: {
+        current_status: currentStatus,
+        payment_snapshot: detail.payment_snapshot,
+      },
+      newValue: {
+        current_status: "AWAITING_PAYMENT",
+        approval_snapshot: approvalSnapshot,
+        payment_snapshot: paymentSnapshot,
+      },
+    });
+
+    await createWorkflowNotification({
+      userId: detail.student_user_id,
+      title: "Payment needs revision",
+      message: `Payment proof for request ${detail.request_reference} was rejected. Reason: ${rejectionReason}`,
+      status: "AWAITING_PAYMENT",
+    });
+
+    await dispatchWorkflowStatusEmails({
+      userIds: [detail.student_user_id],
+      requestReference: detail.request_reference,
+      status: "AWAITING_PAYMENT",
+      title: "Payment needs revision",
+      message: `Payment proof for request ${detail.request_reference} was rejected. Please submit a new payment proof.`,
+      detail,
+      remarks: rejectionReason,
+    });
+
+    return getWorkflowRequestDetail(workflowRequestId, user);
   }
 
   if (action === "payment_confirm") {

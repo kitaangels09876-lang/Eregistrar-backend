@@ -484,6 +484,7 @@ export const deanApproveHandler = act("dean_approve");
 export const collegeAdminApproveHandler = act("college_admin_approve");
 export const feeAssessHandler = act("fee_assess");
 export const paymentConfirmHandler = act("payment_confirm");
+export const paymentRejectHandler = act("payment_reject");
 export const paymentSubmitHandler = async (req: Request, res: Response) => {
   try {
     const file = req.file;
